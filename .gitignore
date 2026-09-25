@@ -1,0 +1,17 @@
+# Official challenge files and generated results stay out of this public repository.
+student_resource/
+dataset/
+data/
+work/
+output/
+artifacts/
+models/
+*.zip
+
+# Local Python and notebook state.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/

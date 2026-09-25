@@ -2,13 +2,24 @@
 
 **Purpose:** This README is the team’s shared reference for the challenge statement, organizer instructions, examples, constraints, known ambiguities, and our engineering workflow.
 
-**Status:** Problem assimilation and process planning only. No blocking method, features, model, thresholds, or implementation have been selected.
+**Status:** The challenge context is documented and a three-person execution plan is ready for review. No challenge dataset, implementation, measured result, or submission is in this repository yet.
 
 **Source basis:** Participant-provided problem statement screenshots, event-instruction screenshots, and screenshots of the challenge video. This file is a structured summary; where the supplied materials disagree or are unclear, the issue is called out rather than silently resolved.
 
+## Team workstreams
+
+**AJ (@Atishay9828) is Person C**, the coordinator and release owner. Person A owns data and candidate generation; Person B owns evaluation and matching. The [execution plan](PLAN.md) defines their shared interfaces, file ownership, decision gates, and submission checkpoints.
+
+- [Person A — data and candidates](docs/workstreams/person-a.md)
+- [Person B — evaluation and matching](docs/workstreams/person-b.md)
+- [Person C — AJ, integration and release](docs/workstreams/person-c.md)
+- [Experiment log](docs/experiments.md)
+
+Only AJ merges team work into main and uploads challenge submissions. The workstream briefs are assignments; the challenge rules summarized below remain the source of truth for required outputs and fair play.
+
 ## 1. User request and source instructions
 
-The current team objective is to understand the challenge and plan a rigorous ML-engineering process before designing a solution. The instructions quoted below are challenge rules addressed to participants. The challenge’s own “tips” and illustrative diagrams are identified as such; they are not additional hard requirements or decisions already made by the team.
+The team first assimilated the challenge and then drafted an execution plan. The instructions quoted below are challenge rules addressed to participants. The challenge’s own “tips” and illustrative diagrams are identified as such; they are not additional hard requirements or measured team results.
 
 ## 2. Challenge objective
 
@@ -193,9 +204,9 @@ Do not resolve these by assumption; retain them for official clarification if ne
 4. **Eligibility:** Top-100 selection depends partly on team-member eligibility, but these screenshots do not define the eligibility criteria.
 5. **Matching structure:** No global one-to-one constraint or ordering requirement for IDs inside a comma-separated list is stated. The explicit duplicate rules apply to repeated Source 1 rows and repeated IDs within a list.
 
-## 14. Team engineering workflow — process only
+## 14. Initial engineering workflow
 
-No solution choices are made here. The intended engineering process is:
+This section records the initial process. The current proposed starting methods and decision gates are in the [execution plan](PLAN.md). The process is:
 
 1. Convert the statement into testable contracts for parsing, labels, candidate output, predictions, score, fair play, licensing, and package structure.
 2. Profile the actual files: counts, missingness, duplicates, source/country distributions, field formats, and match cardinality.
@@ -207,4 +218,4 @@ No solution choices are made here. The intended engineering process is:
 8. Stress-check generalization using training data only; do not use test labels or external lookups.
 9. Reproduce both outputs from the packaged code, run the official validator, and document model license/size and dependencies before submission.
 
-Exact candidate rules, features, model family, thresholds, and any global matching constraints remain undecided until evidence from the data and validation supports a choice.
+The plan proposes starting methods for candidates, features, and model training. Their final configurations and thresholds depend on evidence from the official data and validation. No global one-to-one constraint is assumed.
