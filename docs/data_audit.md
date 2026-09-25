@@ -54,3 +54,7 @@ To exercise real noisy positives before a full run, Codex selected the **first 1
 | Add generic script transliteration and vote-ranked gram probes, cap 32 | 0.9861 | 0.9556 | 0.9968 | 32,000 |
 
 The biggest observed misses before address tokens had no shared normalized name token, often because one source used a different script; 155 of 222 missed links fell in that category, 62 had a shared name token, and 5 were present before final cap. Rare address tokens recovered most of them. The most recent variant uses [AnyAscii](https://github.com/anyascii/anyascii) for generic Unicode transliteration; it performs no business lookup. These experiments are **smoke tests**, not a leakage-aware Person B development split or leaderboard score.
+
+### Local million-target memory benchmark
+
+Codex ran `candidates.py --split train --limit-source1 100 --limit-targets 1000000 --query-chunk 100 --matrix-chunk 100000 --cap 32` against the official files on a 16 GB Windows PC (26 Sep IST). Source 2 indexing took 346.30 s and Source 3 indexing 367.62 s; each had 1,000,000 targets. Process peak working set was 3.20 GiB and the complete run emitted 3,200 pairs. This establishes bounded memory at one million targets; it does not establish full-source RAM, runtime, or candidate recall. The 100 Source 1 records were a file prefix, so this benchmark is only for resources.

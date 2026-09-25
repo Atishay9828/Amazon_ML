@@ -11,8 +11,8 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from candidates import HEADER, Settings, evaluate_retrieval, generate
-from data import iter_records, iter_truth
+from candidates import HEADER, Settings, _select_source1, evaluate_retrieval, generate
+from data import Record, iter_records, iter_truth
 from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
 
@@ -25,6 +25,15 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
 
 
 class PersonATest(unittest.TestCase):
+    def test_seeded_development_and_holdout_are_disjoint(self):
+        records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(12_000)]
+        dev = _select_source1(records, "dev")
+        holdout = _select_source1(records, "holdout")
+        self.assertEqual(len(dev), 10_000)
+        self.assertEqual(len(holdout), 2_000)
+        self.assertFalse({record.entity_id for record in dev} & {record.entity_id for record in holdout})
+        self.assertEqual([record.entity_id for record in dev], sorted(record.entity_id for record in dev))
+
     def test_normalization_preserves_digits_and_avoids_blank_blocks(self):
         self.assertEqual(normalize_name("B+ Retail, Pvt. Ltd & Co"), "b retail private limited and company")
         self.assertEqual(normalize_address("12 St., Apt 4"), "12 street apartment 4")

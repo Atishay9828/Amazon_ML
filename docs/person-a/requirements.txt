@@ -1,0 +1,5 @@
+anyascii==0.3.3
+numpy==2.4.4
+scipy==1.17.1
+scikit-learn==1.7.2
+psutil==7.1.0

@@ -12,7 +12,9 @@ import csv
 import gzip
 import json
 import math
+import multiprocessing
 import os
+import random
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -49,6 +51,7 @@ class Settings:
     indexed_grams: int = 8
     query_grams: int = 16
     max_probe_df: int = 2_000
+    workers: int = 1
 
 
 @dataclass
@@ -155,8 +158,35 @@ def _format_score(value: float) -> str:
     return f"{value:.6f}"
 
 
+def _memory_state() -> dict[str, float]:
+    """Optional process-memory telemetry without a runtime dependency."""
+    try:
+        import psutil
+        info = psutil.Process().memory_info()
+        peak = getattr(info, "peak_wset", info.rss)
+        if os.name == "posix":
+            import resource
+            # ru_maxrss is KiB on Linux and bytes on macOS.
+            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if os.uname().sysname == "Linux":
+                peak *= 1024
+        return {"rss_gb": round(info.rss / (1 << 30), 3),
+                "peak_rss_gb": round(peak / (1 << 30), 3)}
+    except ImportError:
+        return {}
+
+
 def _load_sorted_source1(path: Path, limit: int | None) -> list[Record]:
     return sorted(iter_records(path, 1, max_rows=limit), key=lambda record: record.entity_id)
+
+
+def _select_source1(source1: list[Record], sample_split: str | None) -> list[Record]:
+    """Disjoint seeded development/holdout rows, sampled before retrieval."""
+    if sample_split is None:
+        return source1
+    indices = random.Random(20260926).sample(range(len(source1)), min(60_000, len(source1)))
+    chosen = indices[:10_000] if sample_split == "dev" else indices[10_000:60_000]
+    return [source1[index] for index in sorted(chosen)]
 
 
 def _build_lookups(names: list[str], addresses: list[str], settings: Settings):
@@ -201,10 +231,92 @@ def _read_part(path: Path) -> dict[str, list[tuple[str, str, str, str, str]]]:
     return groups
 
 
+@dataclass
+class _RetrievalState:
+    source1: list[Record]
+    target_ids: list[str]
+    exact_names: dict[str, list[int]]
+    exact_addresses: dict[str, list[int]]
+    rare_names: dict[str, list[int]]
+    name_frequencies: Counter[str]
+    rare_addresses: dict[str, list[int]]
+    address_frequencies: Counter[str]
+    name_index: FieldIndex
+    address_index: FieldIndex
+    settings: Settings
+    work_dir: Path
+    source: int
+
+
+_FORK_STATE: _RetrievalState | None = None
+
+
+def _run_chunk(chunk_number: int) -> int:
+    state = _FORK_STATE
+    if state is None:
+        raise RuntimeError("retrieval state was not initialized before worker fork")
+    settings = state.settings
+    batch = state.source1[chunk_number * settings.query_chunk:(chunk_number + 1) * settings.query_chunk]
+    query_names = [normalize_name(record.business_name) for record in batch]
+    query_addresses = [normalize_address(record.business_address) for record in batch]
+    name_query = state.name_index.query(query_names)
+    address_query = state.address_index.query(query_addresses)
+    part = _part_path(state.work_dir, state.source, chunk_number)
+    part.parent.mkdir(parents=True, exist_ok=True)
+    temp = part.with_suffix(part.suffix + ".tmp")
+    with gzip.open(temp, "wt", encoding="utf-8", newline="", compresslevel=3) as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(HEADER)
+        for row_number, record in enumerate(batch):
+            found: dict[int, set[str]] = defaultdict(set)
+            name = query_names[row_number]
+            address = query_addresses[row_number]
+            if name and len(state.exact_names.get(name, ())) <= settings.max_exact_block:
+                for idx in state.exact_names.get(name, ()):
+                    found[idx].add("exact_name")
+            if address and len(state.exact_addresses.get(address, ())) <= settings.max_exact_block:
+                for idx in state.exact_addresses.get(address, ()):
+                    found[idx].add("exact_address")
+            tokens = informative_name_tokens(name)
+            for token in sorted((t for t in tokens if t in state.rare_names),
+                                key=lambda t: (state.name_frequencies[t], t))[:3]:
+                for idx in state.rare_names[token]:
+                    found[idx].add("rare_name")
+            address_tokens = informative_address_tokens(address)
+            for token in sorted((t for t in address_tokens if t in state.rare_addresses),
+                                key=lambda t: (state.address_frequencies[t], t))[:4]:
+                for idx in state.rare_addresses[token]:
+                    found[idx].add("rare_address")
+            for idx in _best_field_hits(state.name_index, name_query[row_number], settings, settings.name_k):
+                found[int(idx)].add("name_char")
+            for idx in _best_field_hits(state.address_index, address_query[row_number], settings, settings.address_k):
+                found[int(idx)].add("address_char")
+            if not found:
+                continue
+            indices = np.fromiter(found, dtype=np.int32)
+            name_scores = state.name_index.target[indices].dot(name_query[row_number].T).toarray().ravel()
+            address_scores = state.address_index.target[indices].dot(address_query[row_number].T).toarray().ravel()
+            candidates = []
+            for pos, idx in enumerate(indices):
+                channels = "|".join(channel for channel in CHANNEL_ORDER if channel in found[int(idx)])
+                nscore = float(name_scores[pos])
+                ascore = float(address_scores[pos])
+                candidates.append((state.target_ids[int(idx)], _format_score(nscore), _format_score(ascore), channels,
+                                   _rank(nscore, ascore, channels)))
+            # Stage enough per source to reassemble caps 16/32/64 cheaply.
+            candidates.sort(key=lambda row: (-row[4], row[0]))
+            candidates = sorted(candidates[:max(64, settings.name_k + settings.address_k)], key=lambda row: row[0])
+            for target_id, nscore, ascore, channels, _ in candidates:
+                writer.writerow((record.entity_id, target_id, nscore, ascore, channels))
+    os.replace(temp, part)
+    return chunk_number
+
+
 def _retrieve_source(
     source1: list[Record], target_path: Path, source: int, settings: Settings,
     work_dir: Path, limit_targets: int | None,
 ) -> None:
+    global _FORK_STATE
     total_chunks = (len(source1) + settings.query_chunk - 1) // settings.query_chunk
     missing = [i for i in range(total_chunks) if not _part_path(work_dir, source, i).is_file()]
     if not missing:
@@ -218,64 +330,31 @@ def _retrieve_source(
     name_index = _field_index(names, settings)
     address_index = _field_index(addresses, settings)
     print(json.dumps({"stage": "target_index", "source": source, "targets": len(targets),
-                      "seconds": round(time.monotonic() - started, 2)}), flush=True)
-    del targets
-    for chunk_number in missing:
-        batch = source1[chunk_number * settings.query_chunk:(chunk_number + 1) * settings.query_chunk]
-        query_names = [normalize_name(record.business_name) for record in batch]
-        query_addresses = [normalize_address(record.business_address) for record in batch]
-        name_query = name_index.query(query_names)
-        address_query = address_index.query(query_addresses)
-        part = _part_path(work_dir, source, chunk_number)
-        part.parent.mkdir(parents=True, exist_ok=True)
-        temp = part.with_suffix(part.suffix + ".tmp")
-        with gzip.open(temp, "wt", encoding="utf-8", newline="", compresslevel=3) as handle:
-            writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-            writer.writerow(HEADER)
-            for row_number, record in enumerate(batch):
-                found: dict[int, set[str]] = defaultdict(set)
-                name = query_names[row_number]
-                address = query_addresses[row_number]
-                if name and len(exact_names.get(name, ())) <= settings.max_exact_block:
-                    for idx in exact_names.get(name, ()):
-                        found[idx].add("exact_name")
-                if address and len(exact_addresses.get(address, ())) <= settings.max_exact_block:
-                    for idx in exact_addresses.get(address, ()):
-                        found[idx].add("exact_address")
-                tokens = informative_name_tokens(name)
-                for token in sorted((t for t in tokens if t in rare), key=lambda t: (frequencies[t], t))[:3]:
-                    for idx in rare[token]:
-                        found[idx].add("rare_name")
-                address_tokens = informative_address_tokens(address)
-                for token in sorted((t for t in address_tokens if t in rare_address),
-                                    key=lambda t: (address_frequencies[t], t))[:4]:
-                    for idx in rare_address[token]:
-                        found[idx].add("rare_address")
-                for idx in _best_field_hits(name_index, name_query[row_number], settings, settings.name_k):
-                    found[int(idx)].add("name_char")
-                for idx in _best_field_hits(address_index, address_query[row_number], settings, settings.address_k):
-                    found[int(idx)].add("address_char")
-                if not found:
-                    continue
-                indices = np.fromiter(found, dtype=np.int32)
-                name_scores = name_index.target[indices].dot(name_query[row_number].T).toarray().ravel()
-                address_scores = address_index.target[indices].dot(address_query[row_number].T).toarray().ravel()
-                candidates = []
-                for pos, idx in enumerate(indices):
-                    channels = "|".join(channel for channel in CHANNEL_ORDER if channel in found[int(idx)])
-                    nscore = float(name_scores[pos])
-                    ascore = float(address_scores[pos])
-                    candidates.append((target_ids[int(idx)], _format_score(nscore), _format_score(ascore), channels,
-                                       _rank(nscore, ascore, channels)))
-                # Keep a generous per-source stage budget. Overall caps are applied in final assembly.
-                candidates.sort(key=lambda row: (-row[4], row[0]))
-                candidates = sorted(candidates[:max(64, settings.name_k + settings.address_k)], key=lambda row: row[0])
-                for target_id, nscore, ascore, channels, _ in candidates:
-                    writer.writerow((record.entity_id, target_id, nscore, ascore, channels))
-        os.replace(temp, part)
-        if chunk_number == missing[0] or (chunk_number + 1) % 20 == 0 or chunk_number == missing[-1]:
-            print(json.dumps({"stage": "retrieval", "source": source, "chunk": chunk_number + 1,
-                              "of": total_chunks, "seconds": round(time.monotonic() - started, 2)}), flush=True)
+                      "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
+    del targets, names, addresses
+    _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses, rare,
+                                  frequencies, rare_address, address_frequencies,
+                                  name_index, address_index, settings, work_dir, source)
+    if settings.workers > 1 and os.name == "posix":
+        with multiprocessing.get_context("fork").Pool(processes=settings.workers) as pool:
+            completed = pool.imap_unordered(_run_chunk, missing, chunksize=1)
+            for count, chunk_number in enumerate(completed, start=1):
+                if count == 1 or count % 20 == 0 or count == len(missing):
+                    print(json.dumps({"stage": "retrieval", "source": source, "completed_chunks": count,
+                                      "of": total_chunks, "last_chunk": chunk_number + 1,
+                                      "seconds": round(time.monotonic() - started, 2),
+                                      **_memory_state()}), flush=True)
+    else:
+        if settings.workers > 1:
+            print(json.dumps({"stage": "warning", "message": "fork workers unavailable; using one process"}), flush=True)
+        for count, chunk_number in enumerate(missing, start=1):
+            _run_chunk(chunk_number)
+            if count == 1 or count % 20 == 0 or count == len(missing):
+                print(json.dumps({"stage": "retrieval", "source": source, "completed_chunks": count,
+                                  "of": total_chunks, "last_chunk": chunk_number + 1,
+                                  "seconds": round(time.monotonic() - started, 2),
+                                  **_memory_state()}), flush=True)
+    _FORK_STATE = None
 
 
 def _choose_rows(rows2: list, rows3: list, cap: int) -> list:
@@ -293,21 +372,25 @@ def _choose_rows(rows2: list, rows3: list, cap: int) -> list:
 
 
 def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: int | None,
-              limit_targets: int | None) -> dict:
+              limit_targets: int | None, sample_split: str | None) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
-    retrieval_settings = {key: value for key, value in vars(settings).items() if key != "cap"}
-    return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings, "limit_source1": limit_source1,
+    retrieval_settings = {key: value for key, value in vars(settings).items() if key not in {"cap", "workers"}}
+    return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
+            "limit_source1": limit_source1, "sample_split": sample_split,
             "limit_targets": limit_targets, "inputs": {str(p.resolve()): [p.stat().st_size, p.stat().st_mtime_ns] for p in paths}}
 
 
-def evaluate_retrieval(candidate_path: Path, truth_path: Path) -> dict:
-    """Measure candidate coverage and its macro-F0.5 ceiling on a complete train set.
+def evaluate_retrieval(candidate_path: Path, truth_path: Path, selected_ids: set[str] | None = None) -> dict:
+    """Measure candidate coverage and its macro-F0.5 ceiling on train rows.
 
     This is an oracle ceiling, not the score of a trained matcher. It requires
-    candidate rows for *every* training Source 1 record, including implicit
+    candidate rows for every selected Source 1 record, including implicit
     zero-candidate rows. Do not use on `--limit-*` benchmark output.
     """
-    truth = {source1: set(matches) for source1, matches in iter_truth(truth_path)}
+    truth = {source1: set(matches) for source1, matches in iter_truth(truth_path)
+             if selected_ids is None or source1 in selected_ids}
+    if selected_ids is not None and len(truth) != len(selected_ids):
+        raise ValueError("selected Source 1 IDs absent from ground truth")
     total_truth = len(truth)
     total_links = sum(len(matches) for matches in truth.values())
     all_counts: list[int] = []
@@ -373,12 +456,13 @@ def evaluate_retrieval(candidate_path: Path, truth_path: Path) -> dict:
 
 
 def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: Settings,
-             limit_source1: int | None = None, limit_targets: int | None = None) -> None:
-    if settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or settings.query_chunk < 1:
-        raise ValueError("cap/query_chunk must be positive; top-K values must be nonnegative")
+             limit_source1: int | None = None, limit_targets: int | None = None,
+             sample_split: str | None = None) -> set[str] | None:
+    if settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or settings.query_chunk < 1 or settings.workers < 1:
+        raise ValueError("cap/query_chunk/workers must be positive; top-K values must be nonnegative")
     work_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = work_dir / "manifest.json"
-    expected = _manifest(data_root, split, settings, limit_source1, limit_targets)
+    expected = _manifest(data_root, split, settings, limit_source1, limit_targets, sample_split)
     if manifest_path.exists():
         found = json.loads(manifest_path.read_text(encoding="utf-8"))
         if found != expected:
@@ -387,7 +471,7 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         if any(work_dir.iterdir()):
             raise ValueError(f"{work_dir}: nonempty work directory has no manifest")
         manifest_path.write_text(json.dumps(expected, indent=2), encoding="utf-8")
-    source1 = _load_sorted_source1(source_path(data_root, split, 1), limit_source1)
+    source1 = _select_source1(_load_sorted_source1(source_path(data_root, split, 1), limit_source1), sample_split)
     for source in (2, 3):
         _retrieve_source(source1, source_path(data_root, split, source), source, settings, work_dir, limit_targets)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -407,6 +491,7 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
     os.replace(temp_out, out)
     print(json.dumps({"stage": "complete", "source1": len(source1), "pairs": emitted,
                       "output": str(out), "work_dir": str(work_dir)}), flush=True)
+    return {record.entity_id for record in source1} if sample_split else None
 
 
 def main() -> None:
@@ -421,20 +506,25 @@ def main() -> None:
     parser.add_argument("--query-chunk", type=int, default=2048)
     parser.add_argument("--matrix-chunk", type=int, default=100_000)
     parser.add_argument("--hash-features", type=int, default=1 << 20)
+    parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
+    parser.add_argument("--sample-split", choices=("dev", "holdout"),
+                        help="Seeded disjoint 10k development or 50k holdout rows; train only")
     parser.add_argument("--report", type=Path, help="Write train retrieval metrics after full generation")
     args = parser.parse_args()
+    if args.sample_split and (args.split != "train" or args.limit_source1 is not None):
+        parser.error("--sample-split requires train and cannot combine with --limit-source1")
     if args.report and (args.split != "train" or args.limit_source1 is not None or args.limit_targets is not None):
-        parser.error("--report requires a complete, unbounded train run")
+        parser.error("--report requires complete target sources and no --limit-* flags")
     settings = Settings(name_k=args.name_k, address_k=args.address_k, cap=args.cap,
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
-                        hash_features=args.hash_features)
+                        hash_features=args.hash_features, workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
-    generate(args.data_root, args.split, args.out, work_dir, settings,
-             args.limit_source1, args.limit_targets)
+    selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
+                            args.limit_source1, args.limit_targets, args.sample_split)
     if args.report:
-        report = evaluate_retrieval(args.out, args.data_root / "train" / "train_ground_truth.tsv")
+        report = evaluate_retrieval(args.out, args.data_root / "train" / "train_ground_truth.tsv", selected_ids)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"stage": "evaluation", **report}), flush=True)
