@@ -73,7 +73,9 @@ Create a private Kaggle **script** kernel with `kaggle_launcher.py` as its
 `enable_gpu: "false"` and `enable_internet: "true"` (for pip installation).
 Use a unique title and matching ID per mode; set `MODE` in the launcher to
 `smoke`, `dev`, `holdout`, `train`, `test`, or `test-0-of-4` (similarly for
-the other shards). The launcher locates attached
+the other shards). `NAME_K` and `ADDRESS_K` in the launcher default to 32 and
+16; record any experimental changes in the corresponding kernel's title and
+run log. The launcher locates attached
 files under `/kaggle/input`, runs the candidate CLI, and writes output under
 `/kaggle/working`. Use the CLI to operate each kernel:
 

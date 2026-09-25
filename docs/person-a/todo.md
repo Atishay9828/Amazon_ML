@@ -41,5 +41,12 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 | 26 Sep 2026 | Codex | Started private 50k holdout with full train targets | Kaggle kernel `amazon-ml-person-a-holdout-50k` RUNNING after dev freed a CPU slot | Running; do not claim a holdout result yet |
 | 26 Sep 2026 | Codex | Verified local cap nesting and re-scored cap 16 from cap-64 rows | `python -m unittest discover -s code/business_entity_resolution/tests -v` — 9 passed; cap 16: 0.831435 link recall, 0.923140 oracle F0.5 on 10k development rows | Done |
 | 26 Sep 2026 | Codex | Diagnosed 3,740 missing links at diagnostic cap 128 | `analyze_candidate_misses.py` against full-target dev output: 2,453 misses below staged source quota 64; 1,287 at quota. See `docs/data_audit.md`. | Done; use to guide retrieval experiment |
+| 26 Sep 2026 02:31 IST | Codex | Paused at Mridul's request | Kaggle CLI reported the 50k holdout and all four full-test shards RUNNING. No additional kernel was started. The K64/A32 development experiment is prepared locally at `D:\temp\amazon-ml-kernel-dev-k64a32` but **not pushed**. | Paused; remote jobs may finish on their own |
+
+## Resume checkpoint
+
+1. Run `kaggle kernels status mridulnegi2005/<slug>` for `amazon-ml-person-a-holdout-50k` and `amazon-ml-person-a-test-shard-{0,1,2,3}-of-4`. Download completed outputs with the Kaggle CLI and `--file-pattern` so the large staged checkpoints are not copied unnecessarily. Set `$env:PYTHONUTF8='1'` in PowerShell before Kaggle downloads to avoid the Windows console encoding error seen earlier.
+2. Check the holdout's report and validate each full-test shard with `validate_candidate_long.py`; merge the four sorted shards. Keep outputs outside Git. If a CPU slot opens, push the **prepared but not yet run** private `D:\temp\amazon-ml-kernel-dev-k64a32` experiment to test whether larger name/address retrieval limits improve the development recall. Compare against the completed cap-16/32/64 metrics before changing the final configuration.
+3. After full-test jobs free slots, generate full-train shards for Person B, then hand off the actual pair tables and reproducible commands to B/C. Do not claim a final matcher score or submit anything on Mridul's behalf. Continue direct pushes to `feat/data-candidates`; PR #2 stays closed.
 
 Record new entries immediately after each verified run or commit. Never infer completion from a teammate's plan or an unrun command.

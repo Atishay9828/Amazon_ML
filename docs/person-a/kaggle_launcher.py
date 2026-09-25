@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 
 MODE = "smoke"
+NAME_K = 32
+ADDRESS_K = 16
 INPUT = Path("/kaggle/input")
 WORK = Path("/kaggle/working")
 
@@ -58,6 +60,7 @@ def main() -> None:
             "--data-root", str(data), "--split", split,
             "--out", str(out), "--work-dir", str(WORK / f"person-a-{MODE}.work"),
             "--workers", "2" if base_mode == "smoke" else "4",
+            "--name-k", str(NAME_K), "--address-k", str(ADDRESS_K),
             "--cap", "32" if base_mode == "smoke" else "64"]
     if base_mode == "smoke":
         args += ["--limit-source1", "1000", "--limit-targets", "1000000"]
