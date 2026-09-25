@@ -16,20 +16,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
-# Kaggle's image changes; pin the two packages whose APIs this notebook uses.
-def ensure_package(module, requirement):
-    try:
-        imported = __import__(module)
-        if getattr(imported, "__version__", "") == requirement.split("==")[-1]:
-            return
-    except ImportError:
-        pass
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", requirement])
-
-
-ensure_package("duckdb", "duckdb==1.5.5")
-ensure_package("xgboost", "xgboost==2.1.4")
-
 import duckdb
 import numpy as np
 import pandas as pd
@@ -46,7 +32,7 @@ MAX_TOKEN_DF = 64
 MAX_EXACT_DF = 512
 MAX_TOKEN_KEYS_PER_CHANNEL = 3
 MAX_CANDIDATES_PER_SOURCE = 40
-CANDIDATE_VERSION = "v2"
+CANDIDATE_VERSION = "v3"
 DUCKDB_MEMORY = "9GB"
 THREADS = max(2, min(8, os.cpu_count() or 4))
 FEATURES = [
@@ -220,7 +206,8 @@ def build_partition(split, country, source):
             SELECT p.qid, p.tid, p.key_hits, p.name_key, p.address_key, p.number_address_key,
               jaro_winkler_similarity(q.nm, t.nm)::FLOAT AS name_jw,
               CASE WHEN q.ad = '' OR t.ad = '' THEN 0 ELSE jaro_winkler_similarity(q.ad, t.ad) END::FLOAT AS address_jw,
-              jaccard(q.nm, t.nm)::FLOAT AS name_jaccard,
+              CASE WHEN q.nm = '' OR t.nm = '' THEN 0
+                ELSE jaccard(q.nm, t.nm) END::FLOAT AS name_jaccard,
               CASE WHEN q.ad = '' OR t.ad = '' THEN 0 ELSE jaccard(q.ad, t.ad) END::FLOAT AS address_jaccard,
               (least(length(q.nm), length(t.nm))::FLOAT / greatest(1, length(q.nm), length(t.nm)))::FLOAT AS name_length_ratio,
               (least(length(q.ad), length(t.ad))::FLOAT / greatest(1, length(q.ad), length(t.ad)))::FLOAT AS address_length_ratio,
@@ -401,6 +388,8 @@ def predict_one(source, gpu):
     booster = xgb.Booster()
     booster.load_model(str(model_paths[source]))
     booster.set_param({"device": f"cuda:{gpu}", "nthread": max(2, THREADS // 2)})
+    best_iteration = booster.attr("best_iteration")
+    prediction_rounds = int(best_iteration) + 1 if best_iteration is not None else booster.num_boosted_rounds()
     source_parts = [p for p in test_parts if p.name.startswith(source + "_")]
     accepted_files = []
     for part in source_parts:
@@ -412,7 +401,7 @@ def predict_one(source, gpu):
             for batch in reader.iter_batches(batch_size=200_000, columns=["qid", "tid"] + FEATURES):
                 frame = batch.to_pandas()
                 matrix = xgb.DMatrix(np.ascontiguousarray(frame[FEATURES].to_numpy(dtype=np.float32)), feature_names=FEATURES)
-                score = booster.predict(matrix)
+                score = booster.predict(matrix, iteration_range=(0, prediction_rounds))
                 keep = score >= threshold
                 if keep.any():
                     selected = frame.loc[keep, ["qid", "tid"]]
