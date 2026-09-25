@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import random
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from candidates import HEADER, Settings, _select_source1, evaluate_retrieval, generate
+from candidates import HEADER, Settings, _choose_rows, _select_source1, evaluate_retrieval, generate
 from assemble_staged import assemble
 from data import Record, iter_records, iter_truth
 from merge_candidate_shards import merge
@@ -29,6 +30,18 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
 
 
 class PersonATest(unittest.TestCase):
+    def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
+        rng = random.Random(24680)
+        for case in range(100):
+            left = [("S1-1", f"S2-{i:03d}", f"{rng.random():.6f}", f"{rng.random():.6f}", "name_char")
+                    for i in range(rng.randrange(0, 90))]
+            right = [("S1-1", f"S3-{i:03d}", f"{rng.random():.6f}", f"{rng.random():.6f}", "address_char")
+                     for i in range(rng.randrange(0, 90))]
+            large = {row[1] for row in _choose_rows(left, right, 64)}
+            for cap in (16, 32):
+                self.assertLessEqual({row[1] for row in _choose_rows(left, right, cap)}, large,
+                                     f"cap nesting failed in case {case}")
+
     def test_merge_shards_checks_global_pair_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

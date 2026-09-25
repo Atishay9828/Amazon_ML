@@ -17,8 +17,8 @@ from data import source_path
 def assemble(data_root: Path, split: str, work_dir: Path, out: Path, cap: int,
              sample_split: str | None = None, shard_index: int = 0,
              shard_count: int = 1) -> int:
-    if not 1 <= cap <= 64:
-        raise ValueError("staged retrieval supports caps 1 through 64")
+    if not 1 <= cap <= 128:
+        raise ValueError("staged retrieval supports caps 1 through 128; 128 is diagnostic only")
     manifest = json.loads((work_dir / "manifest.json").read_text(encoding="utf-8"))
     expected = {"retrieval_version": RETRIEVAL_VERSION, "split": split,
                 "sample_split": sample_split, "shard_index": shard_index,

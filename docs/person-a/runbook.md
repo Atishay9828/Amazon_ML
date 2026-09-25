@@ -8,7 +8,9 @@ belong in Git.
 ## Local commands
 
 From the repository root, with Python 3.12+ and the A-owned pinned
-dependencies in `docs/person-a/requirements.txt`:
+dependencies in `docs/person-a/requirements.txt`. These match the versions
+printed by the completed private Kaggle CPU smoke (Python 3.12.13; NumPy
+2.0.2; SciPy 1.16.3; scikit-learn 1.6.1; AnyAscii 0.3.3; psutil 7.1.0):
 
 ```powershell
 python -m pip install -r docs/person-a/requirements.txt

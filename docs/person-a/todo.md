@@ -13,11 +13,11 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 - [x] Implement and run strict streaming TSV loader and complete full-data audit; record commands, counts, hashes, and anomalies in `docs/data_audit.md`. Evidence: full audit exited 0; seven input hashes and counts recorded there (Codex, 26 Sep).
 - [x] Implement and test conservative name/address normalization, including empty and Unicode inputs. Evidence: `test_normalization_preserves_digits_and_avoids_blank_blocks` passed (Codex, 26 Sep).
 - [x] Implement exact-name, exact-address, rare-token, and character TF-IDF candidate retrieval with the fixed five-column contract and deterministic cap. Evidence: `src/candidates.py`; invented-fixture generation and repeat run passed. Full-scale quality remains unmeasured (Codex, 26 Sep).
-- [x] Run invented-fixture tests for parsing, deduplication, candidate IDs, scores, France, no-candidate entities, and ordering. Evidence: `python -m unittest discover -s code/business_entity_resolution/tests -v` — 5 passed (Codex, 26 Sep).
+- [x] Run invented-fixture tests for parsing, deduplication, candidate IDs, scores, France, no-candidate entities, ordering, sharding, and cap nesting. Evidence: `python -m unittest discover -s code/business_entity_resolution/tests -v` — 9 passed (Codex, 26 Sep).
 - [x] Benchmark a bounded local sample, including one million targets per source and peak RAM. Evidence: `candidates.py --split train --limit-source1 100 --limit-targets 1000000 --query-chunk 100 --matrix-chunk 100000 --cap 32`; 3.20 GiB peak, 346.30 s/367.62 s source indexing (Codex, 26 Sep). Full-source resource behavior remains pending.
-- [ ] Tune caps on Person B's development split when available; record true-link recall, complete-set coverage, volume, oracle macro F0.5, missed-link categories, and chosen configuration.
+- [ ] Tune caps on the seeded 10,000-row development split (and Person B's split when available); record true-link recall, complete-set coverage, volume, oracle macro F0.5, missed-link categories, and chosen configuration. Cap-16/32/64/diagnostic-128 development results are recorded in `docs/data_audit.md`; miss analysis and the untouched 50,000-row holdout are pending.
 - [ ] Execute full train/test candidate generation in private compute; check files against the contract and provide them to B/C without committing them.
-- [ ] Open a PR to main for Atishay with code, run commands, dependency versions, actual measurements, and remaining risks. Atishay handles merge and portal submission.
+- [ ] Push final A-owned branch commits and send Atishay the branch name, run commands, dependency versions, actual measurements, and remaining risks. Atishay handles integration and portal submission.
 
 ## Run log
 
@@ -35,5 +35,11 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 | 26 Sep 2026 | Codex | Hit Kaggle's active batch CPU limit when trying to start 50k holdout | CLI returned `Maximum batch CPU session count of 5 reached`; dev and four test shards occupy all slots | Retry when a slot frees |
 | 26 Sep 2026 | Codex | Pushed second Person A milestone to Mridul's separate branch | `6498085 feat(person-a): add seeded evaluation and private Kaggle CPU runner` on `origin/feat/data-candidates` | Done |
 | 26 Sep 2026 | Codex | Validated Kaggle smoke candidate table against full official train IDs | `validate_candidate_long.py --input D:\temp\amazon-ml-kernel-smoke-output\person-a-smoke-pairs.tsv --data-root ..\student_resource\dataset --split train --cap 32`; 32,000 sorted unique pairs, 1,000 represented S1, all targets valid | Done, limited-target smoke |
+| 26 Sep 2026 | Codex | Pushed sharding/validation milestone | `e8faee0 feat(person-a): shard full retrieval and validate candidate handoff` on `origin/feat/data-candidates` | Done |
+| 26 Sep 2026 | Codex | Closed the unnecessary draft PR after Mridul requested a branch-only workflow | [PR #2](https://github.com/Atishay9828/Amazon_ML/pull/2) is closed without merge; branch and commits remain | Done; do not reopen |
+| 26 Sep 2026 | Codex | Completed full-target 10k development retrieval and compared caps | Kaggle `amazon-ml-person-a-dev-10k` COMPLETE; cap 32: 0.857981 link recall, 0.939228 oracle F0.5; cap 64: 0.882773, 0.953626; diagnostic cap 128: 0.892436, 0.957544. Outputs/reports are under `D:\temp`, not Git. | Done; retrieval miss analysis in progress |
+| 26 Sep 2026 | Codex | Started private 50k holdout with full train targets | Kaggle kernel `amazon-ml-person-a-holdout-50k` RUNNING after dev freed a CPU slot | Running; do not claim a holdout result yet |
+| 26 Sep 2026 | Codex | Verified local cap nesting and re-scored cap 16 from cap-64 rows | `python -m unittest discover -s code/business_entity_resolution/tests -v` — 9 passed; cap 16: 0.831435 link recall, 0.923140 oracle F0.5 on 10k development rows | Done |
+| 26 Sep 2026 | Codex | Diagnosed 3,740 missing links at diagnostic cap 128 | `analyze_candidate_misses.py` against full-target dev output: 2,453 misses below staged source quota 64; 1,287 at quota. See `docs/data_audit.md`. | Done; use to guide retrieval experiment |
 
 Record new entries immediately after each verified run or commit. Never infer completion from a teammate's plan or an unrun command.

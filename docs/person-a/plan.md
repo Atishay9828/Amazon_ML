@@ -16,7 +16,7 @@ Owner: Mridul. Person B owns matching/evaluation; Atishay owns integration, pack
 3. Retrieve with exact normalized name/address, rare name/address tokens, and float32 character 3–5 gram TF-IDF name/address similarity. Use a bounded rare-gram inverted index to propose records, then compute sparse cosine on those records. Search Source 2 and Source 3 separately rather than making a Cartesian join. Union/deduplicate, score both text fields for each emitted pair, and cap only after retrieval.
 4. Start with name K=32 and address K=16 per target source. Compare final total caps 16/32/64 on development groups. Measure link recall, complete true-set coverage, candidate mean/p95/total, oracle macro F0.5, runtime, and peak RAM. Prefer the smallest configuration within 0.002 oracle F0.5 of the best. Analyze misses; revisit retrieval if recall is below 98% rather than claiming it met the target.
 5. Smoke test with invented fixtures and a local sample. Use a **private** Kaggle CPU environment for the full run if local resource limits are confirmed. A GPU is allowed by challenge rules; switch only after a measured implementation benefits. Keep the runnable CLI path-independent and record versions/resources.
-6. Hand Person B the exact train/test candidate tables and metrics. Hand Atishay source, audit, selected settings, dependencies, and reproducible commands in a PR; Atishay assembles and validates the official wide outputs.
+6. Hand Person B the exact train/test candidate tables and metrics. Push A-owned commits to `feat/data-candidates` and hand Atishay source, audit, selected settings, dependencies, and reproducible commands directly; Atishay assembles and validates the official wide outputs.
 
 ## Evidence and decisions
 
