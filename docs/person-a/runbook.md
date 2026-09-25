@@ -27,6 +27,33 @@ compressed per-source chunks. Keep it when changing only `--cap`, because the
 same retrieved rows can be reassembled at caps 16, 32, or 64. Use a fresh work
 directory if any retrieval setting or input changes; the manifest guards this.
 
+For a full run that may exceed one Kaggle session, use `--shard-count 4` and
+`--shard-index 0`, `1`, `2`, or `3` in four separate kernels. Shards are
+contiguous slices of sorted Source 1 IDs. All four outputs have the same
+header, and `merge_candidate_shards.py` checks order while concatenating them:
+
+```powershell
+python code/business_entity_resolution/src/merge_candidate_shards.py --out D:\temp\person-a-test-cap64.tsv D:\temp\test-shard-0.tsv D:\temp\test-shard-1.tsv D:\temp\test-shard-2.tsv D:\temp\test-shard-3.tsv
+python code/business_entity_resolution/src/recap_candidates.py --in D:\temp\person-a-test-cap64.tsv --out D:\temp\person-a-test-cap32.tsv --cap 32
+python code/business_entity_resolution/src/validate_candidate_long.py --input D:\temp\person-a-test-cap32.tsv --data-root '..\student_resource\dataset' --split test --cap 32
+```
+
+The cap-64 output retains the candidates needed for lower caps with the same
+ranking and source quotas. For representative train evaluation after reducing
+cap 64 to 32 or 16, run:
+
+```powershell
+python code/business_entity_resolution/src/evaluate_candidate_file.py --input D:\temp\person-a-dev-cap32.tsv --data-root '..\student_resource\dataset' --sample-split dev --out D:\temp\person-a-dev-cap32-report.json
+```
+
+The private Kaggle `dev` run may already have emitted cap 32. Its downloaded
+`person-a-dev.work` directory contains the larger per-source retrieval stage.
+Reassemble cap 64 without rebuilding the full target index:
+
+```powershell
+python code/business_entity_resolution/src/assemble_staged.py --data-root '..\student_resource\dataset' --split train --sample-split dev --work-dir D:\temp\amazon-ml-kernel-dev-output\person-a-dev.work --out D:\temp\person-a-dev-cap64.tsv --cap 64
+```
+
 ## Private Kaggle CPU execution
 
 The private official dataset is
@@ -43,7 +70,8 @@ Create a private Kaggle **script** kernel with `kaggle_launcher.py` as its
 `code_file`; attach both dataset slugs in `dataset_sources`, set
 `enable_gpu: "false"` and `enable_internet: "true"` (for pip installation).
 Use a unique title and matching ID per mode; set `MODE` in the launcher to
-`smoke`, `dev`, `holdout`, `train`, or `test`. The launcher locates attached
+`smoke`, `dev`, `holdout`, `train`, `test`, or `test-0-of-4` (similarly for
+the other shards). The launcher locates attached
 files under `/kaggle/input`, runs the candidate CLI, and writes output under
 `/kaggle/working`. Use the CLI to operate each kernel:
 

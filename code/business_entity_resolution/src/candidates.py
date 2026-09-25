@@ -180,10 +180,13 @@ def _load_sorted_source1(path: Path, limit: int | None) -> list[Record]:
     return sorted(iter_records(path, 1, max_rows=limit), key=lambda record: record.entity_id)
 
 
-def _select_source1(source1: list[Record], sample_split: str | None) -> list[Record]:
-    """Disjoint seeded development/holdout rows, sampled before retrieval."""
+def _select_source1(source1: list[Record], sample_split: str | None,
+                    shard_index: int = 0, shard_count: int = 1) -> list[Record]:
+    """Select seeded evaluation rows or one sorted contiguous final-run shard."""
     if sample_split is None:
-        return source1
+        start = len(source1) * shard_index // shard_count
+        stop = len(source1) * (shard_index + 1) // shard_count
+        return source1[start:stop]
     indices = random.Random(20260926).sample(range(len(source1)), min(60_000, len(source1)))
     chosen = indices[:10_000] if sample_split == "dev" else indices[10_000:60_000]
     return [source1[index] for index in sorted(chosen)]
@@ -372,11 +375,13 @@ def _choose_rows(rows2: list, rows3: list, cap: int) -> list:
 
 
 def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: int | None,
-              limit_targets: int | None, sample_split: str | None) -> dict:
+              limit_targets: int | None, sample_split: str | None,
+              shard_index: int, shard_count: int) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
     retrieval_settings = {key: value for key, value in vars(settings).items() if key not in {"cap", "workers"}}
     return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
+            "shard_index": shard_index, "shard_count": shard_count,
             "limit_targets": limit_targets, "inputs": {str(p.resolve()): [p.stat().st_size, p.stat().st_mtime_ns] for p in paths}}
 
 
@@ -457,12 +462,18 @@ def evaluate_retrieval(candidate_path: Path, truth_path: Path, selected_ids: set
 
 def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: Settings,
              limit_source1: int | None = None, limit_targets: int | None = None,
-             sample_split: str | None = None) -> set[str] | None:
+             sample_split: str | None = None, shard_index: int = 0,
+             shard_count: int = 1) -> set[str] | None:
     if settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or settings.query_chunk < 1 or settings.workers < 1:
         raise ValueError("cap/query_chunk/workers must be positive; top-K values must be nonnegative")
+    if shard_count < 1 or not 0 <= shard_index < shard_count:
+        raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
+    if sample_split and shard_count != 1:
+        raise ValueError("sample split and final-run sharding cannot be combined")
     work_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = work_dir / "manifest.json"
-    expected = _manifest(data_root, split, settings, limit_source1, limit_targets, sample_split)
+    expected = _manifest(data_root, split, settings, limit_source1, limit_targets,
+                         sample_split, shard_index, shard_count)
     if manifest_path.exists():
         found = json.loads(manifest_path.read_text(encoding="utf-8"))
         if found != expected:
@@ -471,7 +482,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         if any(work_dir.iterdir()):
             raise ValueError(f"{work_dir}: nonempty work directory has no manifest")
         manifest_path.write_text(json.dumps(expected, indent=2), encoding="utf-8")
-    source1 = _select_source1(_load_sorted_source1(source_path(data_root, split, 1), limit_source1), sample_split)
+    source1 = _select_source1(_load_sorted_source1(source_path(data_root, split, 1), limit_source1),
+                              sample_split, shard_index, shard_count)
     for source in (2, 3):
         _retrieve_source(source1, source_path(data_root, split, source), source, settings, work_dir, limit_targets)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -491,7 +503,7 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
     os.replace(temp_out, out)
     print(json.dumps({"stage": "complete", "source1": len(source1), "pairs": emitted,
                       "output": str(out), "work_dir": str(work_dir)}), flush=True)
-    return {record.entity_id for record in source1} if sample_split else None
+    return {record.entity_id for record in source1} if sample_split or shard_count > 1 else None
 
 
 def main() -> None:
@@ -511,6 +523,8 @@ def main() -> None:
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--sample-split", choices=("dev", "holdout"),
                         help="Seeded disjoint 10k development or 50k holdout rows; train only")
+    parser.add_argument("--shard-index", type=int, default=0, help="Zero-based sorted Source 1 shard")
+    parser.add_argument("--shard-count", type=int, default=1, help="Number of contiguous Source 1 shards")
     parser.add_argument("--report", type=Path, help="Write train retrieval metrics after full generation")
     args = parser.parse_args()
     if args.sample_split and (args.split != "train" or args.limit_source1 is not None):
@@ -522,7 +536,8 @@ def main() -> None:
                         hash_features=args.hash_features, workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
-                            args.limit_source1, args.limit_targets, args.sample_split)
+                            args.limit_source1, args.limit_targets, args.sample_split,
+                            args.shard_index, args.shard_count)
     if args.report:
         report = evaluate_retrieval(args.out, args.data_root / "train" / "train_ground_truth.tsv", selected_ids)
         args.report.parent.mkdir(parents=True, exist_ok=True)

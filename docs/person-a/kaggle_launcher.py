@@ -2,7 +2,8 @@
 
 Upload the A-owned Python sources as ``person-a-code.zip`` in a private Kaggle
 dataset, attach it and the private official data dataset to a script kernel,
-and set MODE below to smoke, dev, holdout, train, or test before ``kaggle kernels push``.
+and set MODE below to smoke, dev, holdout, train, test, or a shard such as
+``test-0-of-4`` before ``kaggle kernels push``.
 All output stays in /kaggle/working until explicitly downloaded by the team.
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -26,8 +28,10 @@ def run(*args: str) -> None:
 
 
 def main() -> None:
-    if MODE not in {"smoke", "dev", "holdout", "train", "test"}:
+    shard = re.fullmatch(r"(train|test)-(\d+)-of-(\d+)", MODE)
+    if MODE not in {"smoke", "dev", "holdout", "train", "test"} and not shard:
         raise ValueError(f"invalid mode: {MODE}")
+    base_mode = shard.group(1) if shard else MODE
     data_files = list(INPUT.rglob("train_source1.tsv"))
     code_files = list(INPUT.rglob("candidates.py"))
     if len(data_files) != 1 or len(code_files) != 1:
@@ -46,19 +50,22 @@ def main() -> None:
                       "sklearn": sklearn.__version__, "psutil": psutil.__version__,
                       "cpu_count": os.cpu_count(), "data": str(data),
                       "code": str(source)}), flush=True)
-    if MODE == "smoke":
+    if base_mode == "smoke":
         run(sys.executable, "-m", "unittest", "discover", "-s", str(source / "tests"), "-v")
     out = WORK / f"person-a-{MODE}-pairs.tsv"
-    split = "test" if MODE == "test" else "train"
+    split = "test" if base_mode == "test" else "train"
     args = [sys.executable, str(source / "src" / "candidates.py"),
             "--data-root", str(data), "--split", split,
             "--out", str(out), "--work-dir", str(WORK / f"person-a-{MODE}.work"),
-            "--workers", "2" if MODE == "smoke" else "4", "--cap", "32"]
-    if MODE == "smoke":
+            "--workers", "2" if base_mode == "smoke" else "4",
+            "--cap", "32" if base_mode == "smoke" else "64"]
+    if base_mode == "smoke":
         args += ["--limit-source1", "1000", "--limit-targets", "1000000"]
-    if MODE in {"dev", "holdout"}:
+    if base_mode in {"dev", "holdout"}:
         args += ["--sample-split", MODE]
-    if MODE in {"dev", "holdout", "train"}:
+    if shard:
+        args += ["--shard-index", shard.group(2), "--shard-count", shard.group(3)]
+    if base_mode in {"dev", "holdout", "train"}:
         args += ["--report", str(WORK / f"person-a-{MODE}-report.json")]
     run(*args)
     print(json.dumps({"stage": "artifact", "mode": MODE, "path": str(out),

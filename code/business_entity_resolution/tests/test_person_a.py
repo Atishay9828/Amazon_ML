@@ -12,7 +12,11 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from candidates import HEADER, Settings, _select_source1, evaluate_retrieval, generate
+from assemble_staged import assemble
 from data import Record, iter_records, iter_truth
+from merge_candidate_shards import merge
+from recap_candidates import recap
+from validate_candidate_long import validate
 from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
 
@@ -25,6 +29,16 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
 
 
 class PersonATest(unittest.TestCase):
+    def test_merge_shards_checks_global_pair_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second = root / "first.tsv", root / "second.tsv"
+            write_tsv(first, HEADER, [("S1-1", "S2-1", "1", "1", "exact_name")])
+            write_tsv(second, HEADER, [("S1-2", "S3-1", "1", "1", "exact_name")])
+            self.assertEqual(merge([first, second], root / "merged.tsv"), 2)
+            with self.assertRaisesRegex(ValueError, "order"):
+                merge([second, first], root / "bad.tsv")
+
     def test_seeded_development_and_holdout_are_disjoint(self):
         records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(12_000)]
         dev = _select_source1(records, "dev")
@@ -33,6 +47,12 @@ class PersonATest(unittest.TestCase):
         self.assertEqual(len(holdout), 2_000)
         self.assertFalse({record.entity_id for record in dev} & {record.entity_id for record in holdout})
         self.assertEqual([record.entity_id for record in dev], sorted(record.entity_id for record in dev))
+
+    def test_sorted_shards_partition_every_source1_record(self):
+        records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(101)]
+        shards = [_select_source1(records, None, index, 4) for index in range(4)]
+        self.assertEqual([record for shard in shards for record in shard], records)
+        self.assertEqual([len(shard) for shard in shards], [25, 25, 25, 26])
 
     def test_normalization_preserves_digits_and_avoids_blank_blocks(self):
         self.assertEqual(normalize_name("B+ Retail, Pvt. Ltd & Co"), "b retail private limited and company")
@@ -88,6 +108,8 @@ class PersonATest(unittest.TestCase):
                                 matrix_chunk=2, hash_features=1 << 12)
             generate(root, "test", output, root / "work", settings)
             first = output.read_bytes()
+            self.assertEqual(assemble(root, "test", root / "work", root / "assembled.tsv", 2), 3)
+            self.assertEqual((root / "assembled.tsv").read_bytes(), first)
             with output.open("r", encoding="utf-8", newline="") as handle:
                 rows = list(csv.reader(handle, delimiter="\t"))
             self.assertEqual(tuple(rows[0]), HEADER)
@@ -98,9 +120,14 @@ class PersonATest(unittest.TestCase):
             self.assertEqual([(row[0], row[1]) for row in rows[1:]],
                              sorted((row[0], row[1]) for row in rows[1:]))
             self.assertTrue(all(0 <= float(row[2]) <= 1 and 0 <= float(row[3]) <= 1 for row in rows[1:]))
+            self.assertEqual(validate(output, root, "test", 2)["candidate_pairs"], 3)
             generate(root, "test", output, root / "work", settings)
             self.assertEqual(output.read_bytes(), first)
             generate(root, "test", output, root / "work", Settings(**{**vars(settings), "cap": 1}))
+            full_cap = root / "full-cap.tsv"
+            full_cap.write_bytes(first)
+            recap(full_cap, root / "recapped.tsv", 1)
+            self.assertEqual((root / "recapped.tsv").read_bytes(), output.read_bytes())
             with output.open("r", encoding="utf-8", newline="") as handle:
                 capped = list(csv.reader(handle, delimiter="\t"))[1:]
             self.assertLessEqual(len(capped), 2)
