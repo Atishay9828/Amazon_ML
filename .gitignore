@@ -15,3 +15,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ipynb_checkpoints/
+
+# Extracted challenge download (local only).
+*_student_resource/
+__MACOSX/

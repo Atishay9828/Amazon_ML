@@ -1,0 +1,11 @@
+# AJ's Kaggle dual T4 experiment
+
+Open `aj_dual_t4_entity_resolution.ipynb` on Kaggle and attach the official challenge download as a **private** dataset. Select the **GPU T4 x2** accelerator, then run its single code cell. It stops immediately if two CUDA devices are unavailable. The notebook finds the `student_resource/dataset/` folder automatically if it is the only attached copy.
+
+The run creates `/kaggle/working/aj_entity_resolution/output/matching_results.tsv` and `candidate_pairs.tsv`, two XGBoost model files, validation score files, and a run manifest. Upload only `matching_results.tsv` to the live portal. The final team package also needs `candidate_pairs.tsv`, the integrated runnable source, pinned environment, and completed methodology document.
+
+The experiment processes one country and target source at a time with DuckDB, keeps bounded name and address posting lists, and measures true-link candidate recall on a deterministic held-out sample. It trains a Source 2 matcher on `cuda:0` and a Source 3 matcher on `cuda:1` concurrently. Threshold selection uses the challenge's macro F0.5 formula over **every** held-out Source 1 entity, including those with no candidates or no true links. It retains any number of accepted matches per Source 1. The actual final candidate set is the exact set scored at inference.
+
+The official data audit is in [DATA_AUDIT.md](DATA_AUDIT.md). The notebook's code is mirrored in [one_cell_solution.py](one_cell_solution.py) so changes can be reviewed as a readable diff; the `.ipynb` contains exactly one code cell. Edit the Python source, then run `python experiments/aj_kaggle/sync_notebook.py` from the repository root before opening the notebook. Keep challenge data, generated predictions, model files, and ZIPs out of this public repository.
+
+**Status:** The notebook syntax, DuckDB blocking query, wide TSV writing, and notebook structure were checked locally on a tiny synthetic example. The full corpus and both T4s have **not** been run here. No local F0.5, France accuracy, Kaggle runtime, portal status, or leaderboard score is claimed. Inspect the notebook's measured candidate recall, singleton score, pair counts, runtime, and disk use before submitting. France is present in test but absent from labeled training, so its accuracy cannot be measured from the supplied labels.
