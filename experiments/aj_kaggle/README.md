@@ -18,7 +18,7 @@ Assembly uses sequential external sorts of only `qid` and `tid`, with one DuckDB
 
 Both outputs receive checks for exact Source 1 coverage, target existence in the official test files, unique pairs, and final matches being a subset of candidates. They are first written to temporary paths; `output_completion.json` is written last and records hashes. The separate organizer validator is not run automatically because it builds large Python collections. This code's validation status is not an organizer `PASS` or leaderboard `SCORED` result.
 
-**Recovery verification:** Python syntax and notebook structure are checked locally. Recovery on AJ's actual Kaggle files remains unverified until that cell completes. If working files were lost, the recovery cell cannot regenerate them.
+**Recovery verification:** AJ supplied a Kaggle log reaching `OUTPUT COMPLETE` at `2026-09-26 04:41:11`. It reports all 1,732,544 Source 1 rows, 88,591,494 candidate pairs, and 4,953,551 accepted links, with the assembler's coverage, existence, uniqueness, and subset checks passing. Process RAM at completion was 0.24 GiB and disk free was 16.01 GiB; these are point-in-time readings, not peak measurements. This confirms the reported recovery run. The output files themselves have not been downloaded or independently checked here, the organizer validator did not run, and the revised full notebook still needs a fresh complete run to verify its new inference checkpoints.
 
 ## Full run
 
@@ -43,7 +43,19 @@ The official data audit is in [DATA_AUDIT.md](DATA_AUDIT.md). Readable source li
 | True-link candidate recall | 0.840123886140238 |
 | Correctly empty singleton predictions | 5,228 / 6,343 |
 | Test inference | All six partitions reported completion; 4,953,551 accepted pairs |
-| Final TSV assembly | Kernel died before output completion; recovery pending |
+| Final TSV assembly | Recovery reported `OUTPUT COMPLETE` at 04:41:11 on September 26 |
+| Source 1 rows in each output | 1,732,544 |
+| Candidate pairs | 88,591,494 |
+| Source 1 entities with no candidates | 13,791 |
+| Assembly checks | PASS: coverage, target existence, unique pairs, match subsets |
+| Organizer validator | Not run |
 | Portal / leaderboard | No submission status or leaderboard score supplied |
+
+Output identity from the recovery log (hashes have not been recomputed locally):
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `matching_results.tsv` | 86,350,245 | `6f4888501f02f8c6ea6e9dc304167614de5c5d8fbf2328bcccc3d00dc458c4b2` |
+| `candidate_pairs.tsv` | 1,164,169,169 | `54c659e077f9e3863d595691be9d22e9e4fe43398aa1ad154c2d92464b7f62dc` |
 
 The 84.01% candidate-link recall means about 15.99% of labeled validation links never reached the matcher. This quality issue is separate from the export failure. Recovery preserves the existing predictions; it does not improve that recall or change the threshold. France is present in test but absent from labeled training, so its accuracy cannot be measured from the supplied labels. Earlier empty-Jaccard guards, use of the saved best iteration during inference, and the removal of package downgrades are retained.

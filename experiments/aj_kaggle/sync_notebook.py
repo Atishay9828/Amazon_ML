@@ -36,7 +36,7 @@ Candidate generation and output assembly use CPU/DuckDB. Output assembly sorts o
 
 **If your previous run finished inference and died during export, use `aj_recover_outputs.ipynb` instead. Do not rerun this full cell to recover files.**
 
-Inspect measured candidate recall, validation score, runtime, disk use, and output validation before uploading. Challenge data, predictions, and models stay private. The recovery change has not yet completed a full Kaggle run; no leaderboard score is claimed. Both TSVs receive streaming checks, including target ID existence. The separate organizer validator is not run automatically because it materializes large Python collections.
+Inspect measured candidate recall, validation score, runtime, disk use, and output validation before uploading. Challenge data, predictions, and models stay private. AJ's September 26 log confirms output recovery from the saved legacy Parquets. This revised full notebook, including the new inference checkpoints, still needs a fresh complete Kaggle run; no leaderboard score is claimed. Both TSVs receive streaming checks, including target ID existence. The separate organizer validator is not run automatically because it materializes large Python collections.
 """, FULL_CODE)
 
 RECOVERY_RUNNER = '''
@@ -76,5 +76,5 @@ The cell requires all six saved candidate Parquets in `test_candidates/`, all si
 
 This sorts narrow ID files with a 768 MB DuckDB budget and streams both TSVs without a global string aggregation. It needs additional disk space for sorted IDs, spill files, and TSVs; progress includes RAM and free disk. It checks exact Source 1 coverage, unique IDs, target existence, and matches being a subset of candidates. The organizer validator is not run automatically.
 
-After **OUTPUT COMPLETE**, download `output/matching_results.tsv`, `output/candidate_pairs.tsv`, and `output_completion.json` from the run directory. Only `matching_results.tsv` goes to the live leaderboard. Preserve the rest of the run for the final reproducible package. The recovery code has had static checks; it has not yet completed on your Kaggle session.
+After **OUTPUT COMPLETE**, download `output/matching_results.tsv`, `output/candidate_pairs.tsv`, and `output_completion.json` from the run directory. Only `matching_results.tsv` goes to the live leaderboard. Preserve the rest of the run for the final reproducible package. AJ's supplied September 26 log reports recovery completed at 04:41:11 with 1,732,544 Source 1 rows and 4,953,551 accepted links; the assembler checks passed. The separate organizer validator did not run, and no leaderboard score has been supplied. If this is that same completed run, download its files without rerunning this cell.
 """, RECOVERY_CODE)
