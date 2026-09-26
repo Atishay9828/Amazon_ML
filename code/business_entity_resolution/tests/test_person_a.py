@@ -30,6 +30,26 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
 
 
 class PersonATest(unittest.TestCase):
+    def test_cross_token_channel_recovers_name_and_address_overlap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Grand Chemical Systems", "529 Sunset Drive, Pullman", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns,
+                      [("S2-1", "Grand Chemical Sytimes", "529 Sunset Dr, Pullamn", "US")])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Unrelated Business", "17 Other Avenue", "US")])
+            output = root / "pairs.tsv"
+            settings = Settings(name_k=0, address_k=0, rare_max_df=0,
+                                rare_address_max_df=0, hash_features=1 << 12,
+                                matrix_chunk=2, query_chunk=2)
+            generate(root, "test", output, root / "work", settings)
+            with output.open("r", encoding="utf-8", newline="") as handle:
+                rows = list(csv.reader(handle, delimiter="\t"))
+            self.assertEqual([(row[0], row[1]) for row in rows[1:]], [("S1-1", "S2-1")])
+            self.assertEqual(rows[1][4], "cross_token")
+
     def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
         rng = random.Random(24680)
         for case in range(100):

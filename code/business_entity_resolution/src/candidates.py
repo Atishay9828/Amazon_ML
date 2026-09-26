@@ -32,8 +32,8 @@ except ImportError:
     from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "name_char", "address_char")
-RETRIEVAL_VERSION = "rare-address-translit-vote-1"
+CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "cross_token", "name_char", "address_char")
+RETRIEVAL_VERSION = "cross-token-1"
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,9 @@ class Settings:
     indexed_grams: int = 8
     query_grams: int = 16
     max_probe_df: int = 2_000
+    cross_max_df: int = 1_000
+    cross_name_tokens: int = 3
+    cross_address_tokens: int = 4
     workers: int = 1
 
 
@@ -68,6 +71,45 @@ class FieldIndex:
         matrix.data[self.common[matrix.indices]] = 0
         matrix.eliminate_zeros()
         return self.tfidf.transform(matrix).tocsr()
+
+
+@dataclass
+class TokenIndex:
+    """Compact postings for informative whole tokens, including moderate-frequency ones."""
+
+    vectorizer: HashingVectorizer
+    posting_offsets: np.ndarray
+    posting_rows: np.ndarray
+
+    def probe(self, query_row: sparse.csr_matrix, limit: int, max_df: int) -> np.ndarray:
+        features = query_row.indices
+        if not len(features) or limit <= 0:
+            return np.empty(0, dtype=np.int32)
+        sizes = self.posting_offsets[features + 1] - self.posting_offsets[features]
+        eligible = np.flatnonzero((sizes > 0) & (sizes <= max_df))
+        if not len(eligible):
+            return np.empty(0, dtype=np.int32)
+        order = np.lexsort((features[eligible], sizes[eligible]))[:limit]
+        postings = [self.posting_rows[self.posting_offsets[features[position]]:
+                                     self.posting_offsets[features[position] + 1]]
+                    for position in eligible[order]]
+        return np.unique(np.concatenate(postings))
+
+
+def _token_index(texts: list[str], settings: Settings, informative_tokens) -> TokenIndex:
+    vectorizer = HashingVectorizer(
+        analyzer="word", token_pattern=r"(?u)\b\w+\b", n_features=settings.hash_features,
+        alternate_sign=False, norm=None, binary=True, dtype=np.float32,
+    )
+    blocks = []
+    for start in range(0, len(texts), settings.matrix_chunk):
+        normalized = [" ".join(informative_tokens(text))
+                      for text in texts[start:start + settings.matrix_chunk]]
+        blocks.append(vectorizer.transform(normalized))
+    matrix = sparse.vstack(blocks, format="csr", dtype=np.float32)
+    del blocks
+    postings = matrix.tocsc()
+    return TokenIndex(vectorizer, postings.indptr, postings.indices)
 
 
 def _field_index(texts: list[str], settings: Settings) -> FieldIndex:
@@ -246,6 +288,8 @@ class _RetrievalState:
     address_frequencies: Counter[str]
     name_index: FieldIndex
     address_index: FieldIndex
+    name_tokens: TokenIndex
+    address_tokens: TokenIndex
     settings: Settings
     work_dir: Path
     source: int
@@ -264,6 +308,10 @@ def _run_chunk(chunk_number: int) -> int:
     query_addresses = [normalize_address(record.business_address) for record in batch]
     name_query = state.name_index.query(query_names)
     address_query = state.address_index.query(query_addresses)
+    name_token_query = state.name_tokens.vectorizer.transform(
+        [" ".join(informative_name_tokens(name)) for name in query_names]).tocsr()
+    address_token_query = state.address_tokens.vectorizer.transform(
+        [" ".join(informative_address_tokens(address)) for address in query_addresses]).tocsr()
     part = _part_path(state.work_dir, state.source, chunk_number)
     part.parent.mkdir(parents=True, exist_ok=True)
     temp = part.with_suffix(part.suffix + ".tmp")
@@ -290,6 +338,13 @@ def _run_chunk(chunk_number: int) -> int:
                                 key=lambda t: (state.address_frequencies[t], t))[:4]:
                 for idx in state.rare_addresses[token]:
                     found[idx].add("rare_address")
+            cross_name = state.name_tokens.probe(name_token_query[row_number],
+                                                 settings.cross_name_tokens, settings.cross_max_df)
+            cross_address = state.address_tokens.probe(address_token_query[row_number],
+                                                       settings.cross_address_tokens, settings.cross_max_df)
+            if len(cross_name) and len(cross_address):
+                for idx in np.intersect1d(cross_name, cross_address, assume_unique=True):
+                    found[int(idx)].add("cross_token")
             for idx in _best_field_hits(state.name_index, name_query[row_number], settings, settings.name_k):
                 found[int(idx)].add("name_char")
             for idx in _best_field_hits(state.address_index, address_query[row_number], settings, settings.address_k):
@@ -332,12 +387,15 @@ def _retrieve_source(
     exact_names, exact_addresses, rare, frequencies, rare_address, address_frequencies = _build_lookups(names, addresses, settings)
     name_index = _field_index(names, settings)
     address_index = _field_index(addresses, settings)
+    name_tokens = _token_index(names, settings, informative_name_tokens)
+    address_tokens = _token_index(addresses, settings, informative_address_tokens)
     print(json.dumps({"stage": "target_index", "source": source, "targets": len(targets),
                       "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
     del targets, names, addresses
     _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses, rare,
                                   frequencies, rare_address, address_frequencies,
-                                  name_index, address_index, settings, work_dir, source)
+                                  name_index, address_index, name_tokens, address_tokens,
+                                  settings, work_dir, source)
     if settings.workers > 1 and os.name == "posix":
         with multiprocessing.get_context("fork").Pool(processes=settings.workers) as pool:
             completed = pool.imap_unordered(_run_chunk, missing, chunksize=1)

@@ -48,13 +48,21 @@ cap 64 to 32 or 16, run:
 python code/business_entity_resolution/src/evaluate_candidate_file.py --input D:\temp\person-a-dev-cap32.tsv --data-root '..\student_resource\dataset' --sample-split dev --out D:\temp\person-a-dev-cap32-report.json
 ```
 
-The private Kaggle `dev` run may already have emitted cap 32. Its downloaded
-`person-a-dev.work` directory contains the larger per-source retrieval stage.
-Reassemble cap 64 without rebuilding the full target index:
+The retrieval source now also contains an **experimental** `cross_token`
+channel: it intersects compact name-token and address-token postings with a
+1,000-document-frequency probe ceiling. `RETRIEVAL_VERSION` separates these
+checkpoints from the older baseline. The private
+`amazon-ml-person-a-dev-cross-token` job uses the same seeded 10k development
+Source 1 IDs, full train targets, and cap 64; its output must be measured
+before selecting it for full train/test generation. Do not combine old staged
+parts with the new version.
 
-```powershell
-python code/business_entity_resolution/src/assemble_staged.py --data-root '..\student_resource\dataset' --split train --sample-split dev --work-dir D:\temp\amazon-ml-kernel-dev-output\person-a-dev.work --out D:\temp\person-a-dev-cap64.tsv --cap 64
-```
+The completed baseline `dev` job was run before `cross_token` existed. Its
+cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
+The current `assemble_staged.py` intentionally rejects that older work
+directory because its retrieval version differs. For any new development run,
+download that run's staged parts and reassemble lower caps with the same code
+version that produced them.
 
 ## Private Kaggle CPU execution
 

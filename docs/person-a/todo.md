@@ -44,6 +44,7 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 | 26 Sep 2026 02:31 IST | Codex | Paused at Mridul's request | Kaggle CLI reported the 50k holdout and all four full-test shards RUNNING. No additional kernel was started. The K64/A32 development experiment is prepared locally at `D:\temp\amazon-ml-kernel-dev-k64a32` but **not pushed**. | Paused; remote jobs may finish on their own |
 | 26 Sep 2026 12:24 IST | Codex | Resumed at Mridul's request; checked overnight runs | Kaggle CLI reported the 50k holdout and all four full-test shards COMPLETE. Holdout cap 64: 172,581 links, 0.881841 recall, 0.951459 oracle macro F0.5, 3,182,916 pairs. See `docs/data_audit.md`. | Done; test shard download/validation pending |
 | 26 Sep 2026 12:24 IST | Codex | Started K64/A32 development experiment on private Kaggle CPU | Kernel `mridulnegi2005/amazon-ml-person-a-dev-k64-a32` RUNNING; same 10k seeded development IDs and complete train targets, name K=64, address K=32, final cap 64 | Running; no result yet |
+| 26 Sep 2026 12:45 IST | Codex | Added a compact cross-field token-posting channel and started a separate private development experiment | `python -m unittest discover -s code/business_entity_resolution/tests -v` — 10 passed; Kaggle kernel `mridulnegi2005/amazon-ml-person-a-dev-cross-token` pushed on the same 10k seeded IDs and complete train targets at cap 64 | Experimental; no recall/resource result yet |
 
 ## Unverified teammate comparison
 
@@ -52,7 +53,7 @@ On 26 Sep, Mridul relayed a teammate's **unverified report** of 6,975/6,986 true
 ## Current next steps (26 Sep 2026, 12:25 IST)
 
 1. Complete Kaggle CLI downloads of the four full-test pair TSVs (started), validate each with `validate_candidate_long.py`, and merge their sorted rows. Keep outputs outside Git. Use `$env:PYTHONUTF8='1'` and `--file-pattern` to avoid the Windows console encoding issue and downloading large staged checkpoints.
-2. Wait for the running K64/A32 development kernel, compare its **development** recall/oracle ceiling and candidate volume with the K32/A16 baseline, then choose a final retrieval configuration. The 50k baseline holdout has already been read once; do not retune from it. The teammate's 99.84% report is unverified and must use the same sample/cap for a fair comparison.
+2. Wait for the running K64/A32 and cross-token development kernels, compare their **development** recall/oracle ceiling, candidate volume, runtime, and memory with the K32/A16 baseline, then choose a final retrieval configuration. The 50k baseline holdout has already been read once; do not retune from it. The teammate's 99.84% report is unverified and must use the same sample/cap for a fair comparison.
 3. Generate full-train candidates for Person B and, if the retrieval configuration changes, regenerate full-test candidates. Hand off actual pair tables, measurements, and reproducible commands to B/C. Continue direct pushes to `feat/data-candidates`; PR #2 stays closed.
 
 Record new entries immediately after each verified run or commit. Never infer completion from a teammate's plan or an unrun command.
