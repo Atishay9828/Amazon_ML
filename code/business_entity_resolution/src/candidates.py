@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import hashlib
 import json
 import math
 import multiprocessing
@@ -390,7 +391,7 @@ class _RetrievalState:
     address_tokens: TokenIndex
     extra: dict[str, tuple[int, ...]]
     blank_extra: dict[str, tuple[int, ...]]
-    match_blocks: dict[str, dict[str, list[int]]]
+    match_blocks: dict[str, "MatchBlocks"]
     settings: Settings
     work_dir: Path
     source: int
@@ -404,18 +405,41 @@ def _always_staged(channels: str) -> bool:
     return "reverse_" in channels or "key_" in channels
 
 
-def _match_blocks(targets: list[Record], cap: int) -> dict[str, dict[str, list[int]]]:
+def _key_hash(key: str) -> int:
+    """Stable 63-bit key digest; a rare collision only adds a candidate the ranker can reject."""
+    return int.from_bytes(hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest(), "little") >> 1
+
+
+@dataclass
+class MatchBlocks:
+    """Sorted key digests per target row; about 12 bytes per key instead of a Python dict entry."""
+
+    hashes: np.ndarray
+    rows: np.ndarray
+    cap: int
+
+    def lookup(self, key: str) -> np.ndarray:
+        if not key:
+            return self.rows[:0]
+        digest = _key_hash(key)
+        start, stop = np.searchsorted(self.hashes, [digest, digest + 1])
+        return self.rows[start:stop] if 0 < stop - start <= self.cap else self.rows[:0]
+
+
+def _match_blocks(targets: list[Record], cap: int) -> dict[str, MatchBlocks]:
     if not cap:
         return {}
-    raw = [match_keys(record.business_name, record.business_address) for record in targets]
-    blocks: dict[str, dict[str, list[int]]] = {}
+    digests = np.full((len(targets), len(KEY_NAMES)), -1, dtype=np.int64)
+    for idx, record in enumerate(targets):
+        for position, key in enumerate(match_keys(record.business_name, record.business_address)):
+            if key:
+                digests[idx, position] = _key_hash(key)
+    blocks: dict[str, MatchBlocks] = {}
     for position, label in enumerate(KEY_NAMES):
-        counts = Counter(key[position] for key in raw if key[position])
-        block: dict[str, list[int]] = defaultdict(list)
-        for idx, key in enumerate(raw):
-            if key[position] and counts[key[position]] <= cap:
-                block[key[position]].append(idx)
-        blocks[label] = dict(block)
+        present = np.flatnonzero(digests[:, position] >= 0).astype(np.int32)
+        values = digests[present, position]
+        order = np.argsort(values, kind="stable")
+        blocks[label] = MatchBlocks(values[order], present[order], cap)
     return blocks
 
 
@@ -500,8 +524,8 @@ def _run_chunk(chunk_number: int) -> int:
                 found[idx].add("reverse_blank_name")
             if state.match_blocks:
                 for label, key in zip(KEY_NAMES, match_keys(record.business_name, record.business_address)):
-                    for idx in state.match_blocks[label].get(key, ()) if key else ():
-                        found[idx].add(label)
+                    for idx in state.match_blocks[label].lookup(key):
+                        found[int(idx)].add(label)
             if not found:
                 continue
             if settings.sibling_seeds:
