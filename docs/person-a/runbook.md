@@ -87,6 +87,21 @@ It remains an experiment until its 10k full-target recall and resource use are
 measured. The full-training word-pair shards were started with the earlier
 defaults and are a separate all-label measurement, not the broad-token result.
 
+To measure the staged proposal ceiling for a downloaded development run,
+download all `person-a-dev.work/source2/part_*.tsv.gz` and
+`person-a-dev.work/source3/part_*.tsv.gz` files without changing their paths,
+then run:
+
+```powershell
+python code/business_entity_resolution/src/evaluate_staged.py --work-dir D:\temp\downloaded-stage\person-a-dev.work --data-root '..\student_resource\dataset' --sample-split dev --out D:\temp\downloaded-stage-report.json
+```
+
+This evaluator checks headers, selected Source 1 IDs, source prefixes,
+duplicate pairs, and contiguous chunk numbering. It does not require the
+current retrieval version because it only counts the staged pairs and their
+ground-truth coverage. Keep the corresponding kernel ID and settings with the
+report so versions are never conflated.
+
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
 The current `assemble_staged.py` intentionally rejects that older work
