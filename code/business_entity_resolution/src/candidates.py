@@ -41,6 +41,7 @@ class Settings:
     name_k: int = 32
     address_k: int = 16
     cap: int = 32
+    stage_cap: int = 64
     query_chunk: int = 2048
     matrix_chunk: int = 100_000
     hash_features: int = 1 << 20
@@ -399,9 +400,9 @@ def _run_chunk(chunk_number: int) -> int:
                 ascore = float(address_scores[pos])
                 candidates.append((state.target_ids[int(idx)], _format_score(nscore), _format_score(ascore), channels,
                                    _rank(nscore, ascore, channels)))
-            # Stage enough per source to reassemble caps 16/32/64 cheaply.
+            # Keep the proposal shortlist separate from the final candidate cap.
             candidates.sort(key=lambda row: (-row[4], row[0]))
-            candidates = sorted(candidates[:max(64, settings.name_k + settings.address_k)], key=lambda row: row[0])
+            candidates = sorted(candidates[:max(settings.stage_cap, settings.name_k + settings.address_k)], key=lambda row: row[0])
             for target_id, nscore, ascore, channels, _ in candidates:
                 writer.writerow((record.entity_id, target_id, nscore, ascore, channels))
     os.replace(temp, part)
@@ -561,7 +562,7 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
              sample_split: str | None = None, shard_index: int = 0,
              shard_count: int = 1) -> set[str] | None:
     if (settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or
-            settings.query_chunk < 1 or settings.workers < 1 or
+            settings.stage_cap < 1 or settings.query_chunk < 1 or settings.workers < 1 or
             settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
     if settings.pair_max_df < 1 or settings.pair_max_hits < 0 or settings.single_max_df < 0 or settings.single_tokens < 0:
@@ -615,6 +616,8 @@ def main() -> None:
     parser.add_argument("--name-k", type=int, default=32)
     parser.add_argument("--address-k", type=int, default=16)
     parser.add_argument("--cap", type=int, default=32)
+    parser.add_argument("--stage-cap", type=int, default=64,
+                        help="Maximum ranked proposals staged per target source before the final cap")
     parser.add_argument("--query-chunk", type=int, default=2048)
     parser.add_argument("--matrix-chunk", type=int, default=100_000)
     parser.add_argument("--hash-features", type=int, default=1 << 20)
@@ -646,6 +649,7 @@ def main() -> None:
     if args.report and (args.split != "train" or args.limit_source1 is not None or args.limit_targets is not None):
         parser.error("--report requires complete target sources and no --limit-* flags")
     settings = Settings(name_k=args.name_k, address_k=args.address_k, cap=args.cap,
+                        stage_cap=args.stage_cap,
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,
                         query_grams=args.query_grams, max_probe_df=args.max_probe_df,

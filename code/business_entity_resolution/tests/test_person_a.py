@@ -110,6 +110,30 @@ class PersonATest(unittest.TestCase):
                 self.assertLessEqual({row[1] for row in _choose_rows(left, right, cap)}, large,
                                      f"cap nesting failed in case {case}")
 
+    def test_stage_cap_controls_proposal_shortlist_independently_of_final_cap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Shared Name", "1 Main Road", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns, [
+                ("S2-1", "Shared Name", "1 Main Road", "US"),
+                ("S2-2", "Shared Name", "2 Main Road", "US"),
+                ("S2-3", "Shared Name", "3 Main Road", "US"),
+            ])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Unrelated", "Elsewhere", "US")])
+            counts = []
+            for stage_cap in (1, 3):
+                output = root / f"pairs-{stage_cap}.tsv"
+                settings = Settings(name_k=0, address_k=0, cap=3, stage_cap=stage_cap,
+                                    rare_max_df=0, rare_address_max_df=0,
+                                    hash_features=1 << 12, matrix_chunk=2, query_chunk=2)
+                generate(root, "test", output, root / f"work-{stage_cap}", settings)
+                with output.open("r", encoding="utf-8", newline="") as handle:
+                    counts.append(len(list(csv.reader(handle, delimiter="\t"))) - 1)
+            self.assertEqual(counts, [1, 3])
+
     def test_merge_shards_checks_global_pair_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

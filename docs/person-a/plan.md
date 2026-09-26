@@ -21,3 +21,12 @@ Owner: Mridul. Person B owns matching/evaluation; Atishay owns integration, pack
 ## Evidence and decisions
 
 Use `docs/person-a/todo.md` as the work log. Mark a task complete only with a dated command, artifact, metric, or commit. Attribute actions to their actual owner. Person B's connected-component development/holdout split is authoritative when available; do not tune on its untouched holdout or public leaderboard.
+
+## Recall improvement decision sequence (26 Sep 2026)
+
+The current best measured 10,000-entity development run is 32,028/34,770 true links at a final cap of 64: 92.1139% link recall. Its staged per-source shortlists contain 32,390 links (93.1550%). Reaching 98% on these same labels would require at least 34,075 links, or 2,047 more than the current final result. This is an optimization target, not an achieved result or a leaderboard score.
+
+1. Compare the running bounded broad-token run against the same seeded Source 1 IDs and full train Source 2/3 pools. Report staged and final recall, not only the latter; higher final recall may conceal a still-low proposal ceiling. Keep the 64-candidate final cap for the direct comparison.
+2. If the proposal ceiling stays below 98%, inspect its missed pairs by shared name/address words, missing fields, target-source saturation, and country. Test one bounded retrieval change at a time: more word-pair postings, more character gram probes, or a deliberately controlled single-word channel. Record candidate volume, runtime, and RAM with every recall result.
+3. If proposal recall is high but final recall is low, compare `--stage-cap 64` against 128/256 per target source, then improve shortlist ranking and source allocation while holding the final cap fixed. Raise the final cap only if the measured recall gain justifies the much larger scorer input and submission artifact.
+4. Apply the chosen configuration once to the untouched 50,000-entity holdout, then generate full train and test tables with identical settings. Person B should evaluate the resulting matcher F0.5, including singleton behavior, before C makes leaderboard and package submissions. A high retrieval recall alone cannot establish a 0.98 F0.5 score.
