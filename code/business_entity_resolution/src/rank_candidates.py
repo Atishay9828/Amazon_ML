@@ -178,8 +178,9 @@ def _stage_manifest(work_dir: Path, split: str, sample_split: str | None,
 def _retrieval_signature(manifest: dict) -> dict:
     settings = manifest["settings"]
     signature = {key: value for key, value in settings.items()
-                 if key not in {"extra_pairs_sha256", "query_chunk", "matrix_chunk"}}
+                 if key not in {"extra_pairs_sha256", "blank_pairs_sha256", "query_chunk", "matrix_chunk"}}
     signature["has_reverse_top1"] = settings.get("extra_pairs_sha256") is not None
+    signature["has_reverse_blank"] = settings.get("blank_pairs_sha256") is not None
     return signature
 
 

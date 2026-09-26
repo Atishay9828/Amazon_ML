@@ -435,6 +435,18 @@ class PersonATest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "config hashes"):
                 rank_infer(root, "test", stage, model_path, root / "ranked-other.tsv", 2)
 
+    def test_signature_ignores_split_specific_pair_files(self):
+        def manifest(extra, blank):
+            settings = {"stage_cap": 256, "query_chunk": 2, "extra_pairs_sha256": extra}
+            if blank:
+                settings["blank_pairs_sha256"] = blank
+            return {"settings": settings}
+
+        self.assertEqual(_retrieval_signature(manifest("train-top1", "train-blank")),
+                         _retrieval_signature(manifest("test-top1", "test-blank")))
+        self.assertNotEqual(_retrieval_signature(manifest("train-top1", "train-blank")),
+                            _retrieval_signature(manifest("test-top1", None)))
+
     def test_sorted_shards_partition_every_source1_record(self):
         records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(101)]
         shards = [_select_source1(records, None, index, 4) for index in range(4)]
