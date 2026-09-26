@@ -88,7 +88,7 @@ def build_index(data_root: Path, split: str, hash_features: int,
 def run(data_root: Path, split: str, out: Path, *, workers: int = 4,
         batch_size: int = 256, hash_features: int = 1 << 22,
         df_cap_fraction: float = 0.002, matrix_chunk: int = 200_000,
-        limit_targets: int | None = None) -> dict:
+        limit_targets: int | None = None, config_hash: str | None = None) -> dict:
     if split not in {"train", "test"}:
         raise ValueError("split must be train or test")
     if workers < 1 or batch_size < 1 or matrix_chunk < 1 or hash_features < 2:
@@ -139,6 +139,7 @@ def run(data_root: Path, split: str, out: Path, *, workers: int = 4,
               "hash_features": hash_features, "df_cap_fraction": df_cap_fraction,
               "batch_size": batch_size, "workers": workers,
               "limit_targets": limit_targets,
+              "config_hash": config_hash,
               "source1_sha256": sha256_file(source_path(data_root, split, 1))}
     metadata = out.with_suffix(out.suffix + ".meta.json")
     metadata.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -159,11 +160,12 @@ def main() -> None:
     parser.add_argument("--matrix-chunk", type=int, default=200_000)
     parser.add_argument("--limit-targets", type=int,
                         help="Smoke benchmark only; output is incomplete")
+    parser.add_argument("--config-hash", help="SHA-256 of the canonical pipeline configuration")
     args = parser.parse_args()
     run(args.data_root, args.split, args.out, workers=args.workers,
         batch_size=args.batch_size, hash_features=args.hash_features,
         df_cap_fraction=args.df_cap_fraction, matrix_chunk=args.matrix_chunk,
-        limit_targets=args.limit_targets)
+        limit_targets=args.limit_targets, config_hash=args.config_hash)
 
 
 if __name__ == "__main__":

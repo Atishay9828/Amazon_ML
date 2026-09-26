@@ -400,6 +400,7 @@ class PersonATest(unittest.TestCase):
             stage = root / "work"
             manifest = {"split": "test", "sample_split": None, "shard_index": 0,
                         "shard_count": 1, "limit_source1": None, "limit_targets": None,
+                        "config_hash": "fixture-config",
                         "settings": {"stage_cap": 256, "query_chunk": 2,
                                      "extra_pairs_sha256": None}}
             stage.mkdir()
@@ -417,7 +418,8 @@ class PersonATest(unittest.TestCase):
             model_path = root / "model.pkl"
             with model_path.open("wb") as handle:
                 pickle.dump({"model": NameScoreModel(), "feature_names": FEATURE_NAMES,
-                             "retrieval_signature": _retrieval_signature(manifest)}, handle)
+                             "retrieval_signature": _retrieval_signature(manifest),
+                             "config_hash": "fixture-config"}, handle)
             out = root / "ranked.tsv"
             report = rank_infer(root, "test", stage, model_path, out, 2)
             self.assertEqual(report["candidate_pairs"], 2)
@@ -425,6 +427,13 @@ class PersonATest(unittest.TestCase):
                 rows = list(csv.reader(handle, delimiter="\t"))
             self.assertEqual(tuple(rows[0]), HEADER)
             self.assertEqual([row[1] for row in rows[1:]], ["S2-1", "S3-1"])
+
+            with model_path.open("wb") as handle:
+                pickle.dump({"model": NameScoreModel(), "feature_names": FEATURE_NAMES,
+                             "retrieval_signature": _retrieval_signature(manifest),
+                             "config_hash": "other-config"}, handle)
+            with self.assertRaisesRegex(ValueError, "config hashes"):
+                rank_infer(root, "test", stage, model_path, root / "ranked-other.tsv", 2)
 
     def test_sorted_shards_partition_every_source1_record(self):
         records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(101)]

@@ -72,6 +72,7 @@ class Settings:
     hop_k: int = 16
     extra_pairs: Path | None = None
     workers: int = 1
+    config_hash: str | None = None
 
 
 @dataclass
@@ -619,12 +620,13 @@ def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: in
               shard_index: int, shard_count: int) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
     retrieval_settings = {key: value for key, value in vars(settings).items()
-                          if key not in {"cap", "final_score", "workers", "extra_pairs"}}
+                          if key not in {"cap", "final_score", "workers", "extra_pairs", "config_hash"}}
     if settings.gram_selection == "hash":
         retrieval_settings["hash_query_order"] = "stable-v1"
     retrieval_settings["extra_pairs_sha256"] = (sha256_file(settings.extra_pairs)
                                                   if settings.extra_pairs else None)
-    return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
+    return {"retrieval_version": RETRIEVAL_VERSION, "split": split,
+            "config_hash": settings.config_hash, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
             "shard_index": shard_index, "shard_count": shard_count,
             "limit_targets": limit_targets, "inputs": {str(p.resolve()): [p.stat().st_size, p.stat().st_mtime_ns] for p in paths}}
@@ -828,6 +830,7 @@ def main() -> None:
                         help="Name neighbors per strong seed; address gets half this budget")
     parser.add_argument("--extra-pairs", type=Path,
                         help="Reverse top-1 TSV produced from Source 1 of this same split")
+    parser.add_argument("--config-hash", help="SHA-256 of the canonical pipeline configuration")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -857,7 +860,7 @@ def main() -> None:
                         sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
                         hop_seeds=args.hop_seeds, hop_k=args.hop_k,
                         extra_pairs=args.extra_pairs,
-                        workers=args.workers)
+                        workers=args.workers, config_hash=args.config_hash)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
                             args.limit_source1, args.limit_targets, args.sample_split,

@@ -164,6 +164,8 @@ def _stage_manifest(work_dir: Path, split: str, sample_split: str | None,
             raise ValueError(f"stage manifest {key} mismatch: {manifest.get(key)!r} != {value!r}")
     if manifest["settings"]["stage_cap"] < min_stage_cap:
         raise ValueError(f"stage cap below required {min_stage_cap}")
+    if "config_hash" not in manifest:
+        raise ValueError("staged manifest has no config hash field")
     return manifest
 
 
@@ -200,7 +202,8 @@ def _iter_chunks(work_dir: Path, source1: list[Record], query_chunk: int):
 
 
 def train(data_root: Path, work_dir: Path, model_out: Path,
-          max_negatives_per_source: int = 32) -> dict:
+          max_negatives_per_source: int = 32,
+          model_params: dict | None = None) -> dict:
     if max_negatives_per_source < 1:
         raise ValueError("max_negatives_per_source must be positive")
     started = time.monotonic()
@@ -252,8 +255,9 @@ def train(data_root: Path, work_dir: Path, model_out: Path,
     X = np.vstack(matrices)
     y = np.concatenate(labels)
     del matrices, labels, context
-    model = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.1,
-                                           max_leaf_nodes=63, random_state=0)
+    model_params = model_params or {"max_iter": 300, "learning_rate": 0.1,
+                                    "max_leaf_nodes": 63, "random_state": 0}
+    model = HistGradientBoostingClassifier(**model_params)
     model.fit(X, y)
     model_out.parent.mkdir(parents=True, exist_ok=True)
     temporary = model_out.with_suffix(model_out.suffix + ".tmp")
@@ -261,12 +265,15 @@ def train(data_root: Path, work_dir: Path, model_out: Path,
         pickle.dump({"model": model, "feature_names": FEATURE_NAMES,
                      "training_source1": len(source1),
                      "retrieval_signature": _retrieval_signature(manifest),
+                     "config_hash": manifest["config_hash"],
+                     "model_params": model_params,
                      "max_negatives_per_source": max_negatives_per_source}, handle)
     os.replace(temporary, model_out)
     report = {"training_source1": len(source1), "samples": int(len(y)),
               "positives": positives, "negatives": int(len(y) - positives),
               "features": list(FEATURE_NAMES),
               "max_negatives_per_source": max_negatives_per_source,
+              "model_params": model_params,
               "seconds": round(time.monotonic() - started, 2), **_memory_state()}
     model_out.with_suffix(model_out.suffix + ".report.json").write_text(
         json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -288,6 +295,8 @@ def infer(data_root: Path, split: str, work_dir: Path, model_path: Path,
         raise ValueError("ranker feature schema differs from current code")
     if bundle["retrieval_signature"] != _retrieval_signature(manifest):
         raise ValueError("ranker was trained on different candidate-generation settings")
+    if bundle.get("config_hash") != manifest.get("config_hash"):
+        raise ValueError("ranker model and staged chunks have different config hashes")
     model = bundle["model"]
     source1 = _select_source1(_load_sorted_source1(source_path(data_root, split, 1), None),
                               sample_split, shard_index, shard_count)
