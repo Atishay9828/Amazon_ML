@@ -5,16 +5,15 @@
     "candidates.gram_selection": "C4 (combined without hash). Current value: hash (R2 net +61 links, about +14% retrieval time).",
     "candidates.name_keys": "C2 (combined + name keys under the learned ranker). Current value: false (E3 and team stage128 showed displacement under _rank).",
     "candidates.hop_seeds / hop_k": "C3 (4 seeds, K32). Current value: 2 / 16 (R3 net +137 links).",
-    "reverse_top1.df_cap_fraction": "C1 reports reverse recall at 0.002. RV measured 88.55% top-1 at 0.01. Current value: 0.002 (faster)."
+    "reverse_top1.df_cap_fraction": "C1 reports reverse recall at 0.002. RV measured 88.55% top-1 at 0.01. Current value: 0.002 (faster).",
+    "candidates.key_cap": "C5 (C1 + four exact keys + key features). Key probe: all four keys at block cap 200 add 469 dev links over R3 cap32 + reverse top-1, before ranking."
   },
-
   "pipeline_order": [
     "1. reverse_top1.py  (per split: train for ranktrain, test for submission)",
     "2. candidates.py    (ranktrain sample, then the target split; identical retrieval settings)",
     "3. rank_candidates.py train  (on the ranktrain staged chunks)",
     "4. rank_candidates.py infer  (on the target split staged chunks, final cap)"
   ],
-
   "reverse_top1": {
     "ngram": "char 3-gram on normalize_name + ' | ' + normalize_address",
     "hash_features": 4194304,
@@ -26,7 +25,6 @@
     "index_source1_of_same_split": true,
     "_measured": "+308 unique dev links over R3; at most 10.0 M extra test pairs"
   },
-
   "candidates": {
     "name_k": 32,
     "address_k": 16,
@@ -55,6 +53,7 @@
     "sibling_address_k": 8,
     "hop_seeds": 2,
     "hop_k": 16,
+    "key_cap": 200,
     "extra_pairs": "<output of step 1 for the same split>",
     "stage_cap": 256,
     "query_chunk": 2048,
@@ -64,22 +63,48 @@
       "sibling_seeds": "Keep 0. It overlaps hop_seeds. Enable only one sibling mechanism.",
       "hash_features": "Keep 2^20. E1 (2^23) was a tie.",
       "stage_cap": "256 is enough. R4: 256 to 2048 per source adds 8 links.",
-      "cap": "Not used for the final set. The learned ranker applies the final cap."
+      "cap": "Not used for the final set. The learned ranker applies the final cap.",
+      "key_cap": "Exact phonetic, OCR-phonetic, compact-with-digits, and numbers+first-code name keys; blocks above this size are skipped; key rows bypass the _rank staging cut."
     }
   },
-
   "ranker": {
     "train_sample_split": "ranktrain",
     "train_source1_ids": 50000,
     "train_selection_rule": "seed 7 sample of train Source 1 IDs outside the seeded dev 10k and holdout 50k",
     "model": "sklearn.ensemble.HistGradientBoostingClassifier",
-    "model_params": {"max_iter": 300, "learning_rate": 0.1, "max_leaf_nodes": 63, "random_state": 0},
+    "model_params": {
+      "max_iter": 300,
+      "learning_rate": 0.1,
+      "max_leaf_nodes": 63,
+      "random_state": 0
+    },
     "max_negatives_per_source": 32,
     "features": [
-      "name_cosine", "address_cosine", "prod", "mx", "mn", "is_s3",
-      "base_rank", "base_pos", "name_pos", "addr_pos", "source_count", "n_channels",
-      "name_jac", "addr_jac", "num_jac", "num_any", "num_conflict",
-      "sig_eq", "compact_eq", "t_addr_blank", "country_eq",
+      "name_cosine",
+      "address_cosine",
+      "prod",
+      "mx",
+      "mn",
+      "is_s3",
+      "base_rank",
+      "base_pos",
+      "name_pos",
+      "addr_pos",
+      "source_count",
+      "n_channels",
+      "name_jac",
+      "addr_jac",
+      "num_jac",
+      "num_any",
+      "num_conflict",
+      "sig_eq",
+      "compact_eq",
+      "t_addr_blank",
+      "country_eq",
+      "keq_phonetic",
+      "keq_ocr",
+      "keq_compact",
+      "keq_numbers",
       "ch_<every channel in CHANNEL_ORDER>"
     ],
     "country_policy": "feature only, never a filter (France appears only in test)",
@@ -93,13 +118,11 @@
       "_rank cap 64 (current default)": "93.74%"
     }
   },
-
   "expected_volume_test": {
     "forward_pairs_cap32": "1,732,544 x 32 = 55.4 M",
     "reverse_pairs_top1": "<= 10.0 M before overlap",
     "current_cap64_file": "110.3 M"
   },
-
   "not_recommended": {
     "hash_features_2^23": "E1 tie (-17 links)",
     "exact_keys_with_rank_bonus": "E3 displaced 881 true links",

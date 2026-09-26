@@ -1,6 +1,8 @@
 {
   "_status": "Historical candidates.py defaults before the final Person A configuration.",
-  "reverse_top1": {"enabled": false},
+  "reverse_top1": {
+    "enabled": false
+  },
   "candidates": {
     "name_k": 32,
     "address_k": 16,
@@ -32,8 +34,12 @@
     "sibling_address_k": 8,
     "hop_seeds": 0,
     "hop_k": 16,
+    "key_cap": 0,
     "extra_pairs": null,
     "workers": 1
   },
-  "ranker": {"enabled": false, "final_cap": 32}
+  "ranker": {
+    "enabled": false,
+    "final_cap": 32
+  }
 }

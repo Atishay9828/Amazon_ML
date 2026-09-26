@@ -25,6 +25,7 @@ try:
     from .candidates import (CHANNEL_ORDER, HEADER, _load_sorted_source1,
                              _memory_state, _part_path, _select_source1, _rank)
     from .data import Record, iter_records, iter_truth, source_path
+    from .match_keys import keys as match_keys
     from .normalization import (compact_name, informative_address_tokens,
                                 informative_name_tokens, name_token_signature,
                                 normalize_address, normalize_name)
@@ -32,6 +33,7 @@ except ImportError:
     from candidates import (CHANNEL_ORDER, HEADER, _load_sorted_source1,
                             _memory_state, _part_path, _select_source1, _rank)
     from data import Record, iter_records, iter_truth, source_path
+    from match_keys import keys as match_keys
     from normalization import (compact_name, informative_address_tokens,
                                informative_name_tokens, name_token_signature,
                                normalize_address, normalize_name)
@@ -41,7 +43,8 @@ BASE_FEATURES = ("name_cosine", "address_cosine", "prod", "mx", "mn",
                  "is_s3", "base_rank", "base_pos", "name_pos", "addr_pos",
                  "source_count", "n_channels", "name_jac", "addr_jac",
                  "num_jac", "num_any", "num_conflict", "sig_eq",
-                 "compact_eq", "t_addr_blank", "country_eq")
+                 "compact_eq", "t_addr_blank", "country_eq",
+                 "keq_phonetic", "keq_ocr", "keq_compact", "keq_numbers")
 FEATURE_NAMES = BASE_FEATURES + tuple("ch_" + channel for channel in CHANNEL_ORDER)
 _NUMBER = re.compile(r"(?<!\w)(\d+)(?:st|nd|rd|th)?\b")
 
@@ -55,6 +58,7 @@ class Prepared:
     compact: str
     address_blank: bool
     country: str
+    match: tuple[str, str, str, str]
 
 
 def _prepare(record: Record) -> Prepared:
@@ -64,7 +68,8 @@ def _prepare(record: Record) -> Prepared:
                     frozenset(informative_address_tokens(address)),
                     frozenset(_NUMBER.findall(address)),
                     name_token_signature(name), compact_name(name),
-                    not bool(address), record.country)
+                    not bool(address), record.country,
+                    match_keys(record.business_name, record.business_address))
 
 
 def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
@@ -122,7 +127,8 @@ def features_for_group(source1_id: str,
                       bool(source1.numbers and target.numbers and not common_numbers),
                       bool(source1.signature and source1.signature == target.signature),
                       bool(len(source1.compact) >= 8 and source1.compact == target.compact),
-                      target.address_blank, source1.country == target.country)
+                      target.address_blank, source1.country == target.country,
+                      *(bool(left and left == right) for left, right in zip(source1.match, target.match)))
             matrix[offset + local] = values + tuple(channel in channels for channel in CHANNEL_ORDER)
     return rows, matrix
 

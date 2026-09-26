@@ -26,15 +26,17 @@ from sklearn.feature_extraction.text import HashingVectorizer, TfidfTransformer
 
 try:  # permit both `python -m src.candidates` and direct script execution
     from .data import Record, iter_records, iter_truth, sha256_file, source_path
+    from .match_keys import KEY_NAMES, keys as match_keys
     from .normalization import (compact_name, informative_address_tokens, informative_name_tokens,
                                 name_token_signature, normalize_address, normalize_name)
 except ImportError:
     from data import Record, iter_records, iter_truth, sha256_file, source_path
+    from match_keys import KEY_NAMES, keys as match_keys
     from normalization import (compact_name, informative_address_tokens, informative_name_tokens,
                                name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop", "reverse_top1")
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop", "reverse_top1") + KEY_NAMES
 RETRIEVAL_VERSION = "name-key-1"
 
 
@@ -71,6 +73,7 @@ class Settings:
     hop_seeds: int = 0
     hop_k: int = 16
     extra_pairs: Path | None = None
+    key_cap: int = 0
     workers: int = 1
     config_hash: str | None = None
 
@@ -385,12 +388,33 @@ class _RetrievalState:
     name_tokens: TokenIndex
     address_tokens: TokenIndex
     extra: dict[str, tuple[int, ...]]
+    match_blocks: dict[str, dict[str, list[int]]]
     settings: Settings
     work_dir: Path
     source: int
 
 
 _FORK_STATE: _RetrievalState | None = None
+
+
+def _always_staged(channels: str) -> bool:
+    """Reverse and exact-key proposals bypass the _rank cut; the learned ranker decides them."""
+    return "reverse_top1" in channels or "key_" in channels
+
+
+def _match_blocks(targets: list[Record], cap: int) -> dict[str, dict[str, list[int]]]:
+    if not cap:
+        return {}
+    raw = [match_keys(record.business_name, record.business_address) for record in targets]
+    blocks: dict[str, dict[str, list[int]]] = {}
+    for position, label in enumerate(KEY_NAMES):
+        counts = Counter(key[position] for key in raw if key[position])
+        block: dict[str, list[int]] = defaultdict(list)
+        for idx, key in enumerate(raw):
+            if key[position] and counts[key[position]] <= cap:
+                block[key[position]].append(idx)
+        blocks[label] = dict(block)
+    return blocks
 
 
 def _run_chunk(chunk_number: int) -> int:
@@ -470,6 +494,10 @@ def _run_chunk(chunk_number: int) -> int:
                 found[int(idx)].add("address_char")
             for idx in state.extra.get(record.entity_id, ()):
                 found[idx].add("reverse_top1")
+            if state.match_blocks:
+                for label, key in zip(KEY_NAMES, match_keys(record.business_name, record.business_address)):
+                    for idx in state.match_blocks[label].get(key, ()) if key else ():
+                        found[idx].add(label)
             if not found:
                 continue
             if settings.sibling_seeds:
@@ -518,7 +546,7 @@ def _run_chunk(chunk_number: int) -> int:
             candidates.sort(key=lambda row: (-row[4], row[0]))
             keep = max(settings.stage_cap, settings.name_k + settings.address_k)
             candidates = sorted(candidates[:keep] +
-                                [row for row in candidates[keep:] if "reverse_top1" in row[3]],
+                                [row for row in candidates[keep:] if _always_staged(row[3])],
                                 key=lambda row: row[0])
             for target_id, nscore, ascore, channels, _ in candidates:
                 writer.writerow((record.entity_id, target_id, nscore, ascore, channels))
@@ -571,13 +599,14 @@ def _retrieve_source(
     address_tokens = _token_index(addresses, settings, informative_address_tokens)
     print(json.dumps({"stage": "target_index", "source": source, "targets": len(targets),
                       "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
+    match_blocks = _match_blocks(targets, settings.key_cap)
     del targets, names, addresses
     extra = _load_extra(settings.extra_pairs, target_ids,
                         {record.entity_id for record in source1}, source)
     _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses,
                                  name_signatures, compact_names, rare,
                                  frequencies, rare_address, address_frequencies,
-                                 name_index, address_index, name_tokens, address_tokens, extra,
+                                 name_index, address_index, name_tokens, address_tokens, extra, match_blocks,
                                  settings, work_dir, source)
     if settings.workers > 1 and os.name == "posix":
         with multiprocessing.get_context("fork").Pool(processes=settings.workers) as pool:
@@ -722,6 +751,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("final_score must be current or balanced")
     if settings.sibling_seeds < 0 or settings.sibling_name_k < 0 or settings.sibling_address_k < 0:
         raise ValueError("sibling seed and neighbor budgets must be nonnegative")
+    if settings.key_cap < 0:
+        raise ValueError("key_cap must be nonnegative")
     if settings.hop_seeds < 0 or settings.hop_k < 0:
         raise ValueError("hop seed and neighbor budgets must be nonnegative")
     if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
@@ -830,6 +861,8 @@ def main() -> None:
                         help="Name neighbors per strong seed; address gets half this budget")
     parser.add_argument("--extra-pairs", type=Path,
                         help="Reverse top-1 TSV produced from Source 1 of this same split")
+    parser.add_argument("--key-cap", type=int, default=0,
+                        help="Maximum block size for exact phonetic/OCR/compact/number keys; zero disables them")
     parser.add_argument("--config-hash", help="SHA-256 of the canonical pipeline configuration")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
@@ -859,7 +892,7 @@ def main() -> None:
                         name_keys=args.name_keys, sibling_seeds=args.sibling_seeds,
                         sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
                         hop_seeds=args.hop_seeds, hop_k=args.hop_k,
-                        extra_pairs=args.extra_pairs,
+                        extra_pairs=args.extra_pairs, key_cap=args.key_cap,
                         workers=args.workers, config_hash=args.config_hash)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
