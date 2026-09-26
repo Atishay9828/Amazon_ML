@@ -25,16 +25,16 @@ from scipy import sparse
 from sklearn.feature_extraction.text import HashingVectorizer, TfidfTransformer
 
 try:  # permit both `python -m src.candidates` and direct script execution
-    from .data import Record, iter_records, iter_truth, source_path
+    from .data import Record, iter_records, iter_truth, sha256_file, source_path
     from .normalization import (compact_name, informative_address_tokens, informative_name_tokens,
                                 name_token_signature, normalize_address, normalize_name)
 except ImportError:
-    from data import Record, iter_records, iter_truth, source_path
+    from data import Record, iter_records, iter_truth, sha256_file, source_path
     from normalization import (compact_name, informative_address_tokens, informative_name_tokens,
                                name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop")
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop", "reverse_top1")
 RETRIEVAL_VERSION = "name-key-1"
 
 
@@ -70,6 +70,7 @@ class Settings:
     sibling_address_k: int = 8
     hop_seeds: int = 0
     hop_k: int = 16
+    extra_pairs: Path | None = None
     workers: int = 1
 
 
@@ -373,6 +374,7 @@ class _RetrievalState:
     address_index: FieldIndex
     name_tokens: TokenIndex
     address_tokens: TokenIndex
+    extra: dict[str, tuple[int, ...]]
     settings: Settings
     work_dir: Path
     source: int
@@ -456,6 +458,8 @@ def _run_chunk(chunk_number: int) -> int:
                 found[int(idx)].add("name_char")
             for idx in _best_field_hits(state.address_index, address_query[row_number], settings, settings.address_k):
                 found[int(idx)].add("address_char")
+            for idx in state.extra.get(record.entity_id, ()):
+                found[idx].add("reverse_top1")
             if not found:
                 continue
             if settings.sibling_seeds:
@@ -502,11 +506,37 @@ def _run_chunk(chunk_number: int) -> int:
                                    _rank(nscore, ascore, channels)))
             # Keep the proposal shortlist separate from the final candidate cap.
             candidates.sort(key=lambda row: (-row[4], row[0]))
-            candidates = sorted(candidates[:max(settings.stage_cap, settings.name_k + settings.address_k)], key=lambda row: row[0])
+            keep = max(settings.stage_cap, settings.name_k + settings.address_k)
+            candidates = sorted(candidates[:keep] +
+                                [row for row in candidates[keep:] if "reverse_top1" in row[3]],
+                                key=lambda row: row[0])
             for target_id, nscore, ascore, channels, _ in candidates:
                 writer.writerow((record.entity_id, target_id, nscore, ascore, channels))
     os.replace(temp, part)
     return chunk_number
+
+
+def _load_extra(path: Path | None, target_ids: list[str],
+                selected_source1: set[str], source: int) -> dict[str, tuple[int, ...]]:
+    if path is None:
+        return {}
+    target_positions = {target_id: position for position, target_id in enumerate(target_ids)}
+    extra: dict[str, set[int]] = defaultdict(set)
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle, delimiter="\t", strict=True)
+        if tuple(next(reader, ())) != ("source1_entity_id", "candidate_entity_id"):
+            raise ValueError(f"{path}: invalid reverse-pair header")
+        for line, row in enumerate(reader, start=2):
+            if len(row) != 2:
+                raise ValueError(f"{path}:{line}: expected two tab-separated IDs")
+            source1_id, target_id = row
+            if source1_id not in selected_source1 or not target_id.startswith(f"S{source}-"):
+                continue
+            position = target_positions.get(target_id)
+            if position is None:
+                raise ValueError(f"{path}:{line}: target ID absent from source {source}")
+            extra[source1_id].add(position)
+    return {source1_id: tuple(sorted(positions)) for source1_id, positions in extra.items()}
 
 
 def _retrieve_source(
@@ -532,11 +562,13 @@ def _retrieve_source(
     print(json.dumps({"stage": "target_index", "source": source, "targets": len(targets),
                       "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
     del targets, names, addresses
+    extra = _load_extra(settings.extra_pairs, target_ids,
+                        {record.entity_id for record in source1}, source)
     _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses,
-                                  name_signatures, compact_names, rare,
-                                  frequencies, rare_address, address_frequencies,
-                                  name_index, address_index, name_tokens, address_tokens,
-                                  settings, work_dir, source)
+                                 name_signatures, compact_names, rare,
+                                 frequencies, rare_address, address_frequencies,
+                                 name_index, address_index, name_tokens, address_tokens, extra,
+                                 settings, work_dir, source)
     if settings.workers > 1 and os.name == "posix":
         with multiprocessing.get_context("fork").Pool(processes=settings.workers) as pool:
             completed = pool.imap_unordered(_run_chunk, missing, chunksize=1)
@@ -578,9 +610,11 @@ def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: in
               shard_index: int, shard_count: int) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
     retrieval_settings = {key: value for key, value in vars(settings).items()
-                          if key not in {"cap", "final_score", "workers"}}
+                          if key not in {"cap", "final_score", "workers", "extra_pairs"}}
     if settings.gram_selection == "hash":
         retrieval_settings["hash_query_order"] = "stable-v1"
+    retrieval_settings["extra_pairs_sha256"] = (sha256_file(settings.extra_pairs)
+                                                  if settings.extra_pairs else None)
     return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
             "shard_index": shard_index, "shard_count": shard_count,
@@ -687,6 +721,13 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
     if sample_split and shard_count != 1:
         raise ValueError("sample split and final-run sharding cannot be combined")
+    if settings.extra_pairs:
+        metadata_path = settings.extra_pairs.with_suffix(settings.extra_pairs.suffix + ".meta.json")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if (metadata.get("split") != split or
+                metadata.get("source1_sha256") != sha256_file(source_path(data_root, split, 1)) or
+                metadata.get("limit_targets") != limit_targets):
+            raise ValueError("reverse pairs were built from a different split, Source 1 file, or target limit")
     work_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = work_dir / "manifest.json"
     expected = _manifest(data_root, split, settings, limit_source1, limit_targets,
@@ -776,6 +817,8 @@ def main() -> None:
                         help="Strong first-pass target rows to reuse as same-source queries")
     parser.add_argument("--hop-k", type=int, default=16,
                         help="Name neighbors per strong seed; address gets half this budget")
+    parser.add_argument("--extra-pairs", type=Path,
+                        help="Reverse top-1 TSV produced from Source 1 of this same split")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -804,6 +847,7 @@ def main() -> None:
                         name_keys=args.name_keys, sibling_seeds=args.sibling_seeds,
                         sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
                         hop_seeds=args.hop_seeds, hop_k=args.hop_k,
+                        extra_pairs=args.extra_pairs,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,

@@ -24,6 +24,7 @@ from aggregate_shard_reports import aggregate
 from data import Record, iter_records, iter_truth
 from merge_candidate_shards import merge
 from recap_candidates import recap
+from reverse_top1 import run as run_reverse_top1
 from stage_cutoff_curve import curve
 from validate_candidate_long import validate
 from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
@@ -216,6 +217,49 @@ class PersonATest(unittest.TestCase):
                 rows = list(csv.reader(handle, delimiter="\t"))[1:]
             channels = {row[1]: row[4].split("|") for row in rows}
             self.assertIn("second_hop", channels["S2-2"])
+
+    def test_reverse_top1_pairs_survive_stage_and_reject_other_split(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-TEST", "Alpha Supply", "1 Main Road", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns, [
+                ("S2-1", "Alpha Supply", "1 Main Road", "US"),
+                ("S2-2", "Alpha Other", "99 Other Lane", "US"),
+            ])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Different Business", "Far Street", "US")])
+            write_tsv(root / "train" / "train_source1.tsv", columns,
+                      [("S1-TRAIN", "Alpha Supply", "1 Main Road", "US")])
+            write_tsv(root / "train" / "train_source2.tsv", columns,
+                      [("S2-TRAIN", "Alpha Supply", "1 Main Road", "US")])
+            write_tsv(root / "train" / "train_source3.tsv", columns,
+                      [("S3-TRAIN", "Different", "Elsewhere", "US")])
+            reverse = root / "reverse.tsv"
+            report = run_reverse_top1(root, "test", reverse, workers=1,
+                                      batch_size=2, hash_features=1 << 12,
+                                      matrix_chunk=2)
+            self.assertEqual(report["split"], "test")
+            with reverse.open("r", encoding="utf-8", newline="") as handle:
+                reverse_rows = list(csv.reader(handle, delimiter="\t"))
+            self.assertIn(["S1-TEST", "S2-2"], reverse_rows)
+            settings = Settings(name_k=0, address_k=0, cap=3, stage_cap=1,
+                                cross_name_tokens=0, cross_address_tokens=0,
+                                hash_features=1 << 12, matrix_chunk=2,
+                                query_chunk=2, extra_pairs=reverse)
+            out = root / "pairs.tsv"
+            generate(root, "test", out, root / "work", settings)
+            with out.open("r", encoding="utf-8", newline="") as handle:
+                channels = {row[1]: row[4].split("|")
+                            for row in list(csv.reader(handle, delimiter="\t"))[1:]}
+            self.assertIn("reverse_top1", channels["S2-2"])
+            with gzip.open(root / "work" / "source2" / "part_000000.tsv.gz",
+                           "rt", encoding="utf-8", newline="") as handle:
+                staged = [row[1] for row in list(csv.reader(handle, delimiter="\t"))[1:]]
+            self.assertIn("S2-2", staged)
+            with self.assertRaisesRegex(ValueError, "different split"):
+                generate(root, "train", root / "wrong.tsv", root / "wrong-work", settings)
 
     def test_stage_cutoff_curve_counts_ranked_links_before_final_cap(self):
         with tempfile.TemporaryDirectory() as directory:
