@@ -45,7 +45,8 @@ def _choose(rows2: list, rows3: list, cap: int, quota: int, rule: str) -> list:
 
 
 def evaluate(work_dir: Path, data_root: Path, sample_split: str,
-             cap: int = 64, quotas: tuple[int, ...] = (0, 16, 24, 32)) -> dict:
+             cap: int = 64, quotas: tuple[int, ...] = (0, 16, 24, 32),
+             rules: tuple[str, ...] = ("current", "cosine", "balanced", "both_fields")) -> dict:
     if cap < 1 or any(quota < 0 or quota > cap // 2 for quota in quotas):
         raise ValueError("cap must be positive and quotas must fit both sources")
     chosen = _select_source1(_load_sorted_source1(source_path(data_root, "train", 1), None), sample_split)
@@ -64,8 +65,9 @@ def evaluate(work_dir: Path, data_root: Path, sample_split: str,
     if len(parts[0]) != len(parts[1]):
         raise ValueError("Source 2 and Source 3 have different chunk counts")
 
-    variants = [(rule, quota) for rule in ("current", "cosine", "balanced", "both_fields")
-                for quota in quotas]
+    if not rules or any(rule not in {"current", "cosine", "balanced", "both_fields"} for rule in rules):
+        raise ValueError("provide at least one known score rule")
+    variants = [(rule, quota) for rule in rules for quota in quotas]
     totals = {variant: defaultdict(float) for variant in variants}
     seen: set[str] = set()
     for part2, part3 in zip(*parts, strict=True):
@@ -121,9 +123,12 @@ def main() -> None:
     parser.add_argument("--sample-split", required=True, choices=("dev", "holdout"))
     parser.add_argument("--cap", type=int, default=64)
     parser.add_argument("--quotas", type=int, nargs="+", default=[0, 16, 24, 32])
+    parser.add_argument("--rules", nargs="+", choices=("current", "cosine", "balanced", "both_fields"),
+                        default=["current", "cosine", "balanced", "both_fields"])
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    result = evaluate(args.work_dir, args.data_root, args.sample_split, args.cap, tuple(args.quotas))
+    result = evaluate(args.work_dir, args.data_root, args.sample_split, args.cap,
+                      tuple(args.quotas), tuple(args.rules))
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
