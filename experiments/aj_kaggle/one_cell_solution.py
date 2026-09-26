@@ -1,16 +1,12 @@
-"""AJ's self-contained Kaggle experiment. The notebook contains this whole file as one code cell.
+"""AJ's Kaggle experiment, embedded with output_assembly.py in one notebook cell.
 
 Official challenge data stays outside Git. This is an experimental, measurable
 pipeline, not a claim of a winning or Kaggle-verified score.
 """
 
-import csv
 import gc
 import hashlib
-import json
 import os
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -23,6 +19,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 import xgboost as xgb
+
+from output_assembly import assemble_outputs, ao_atomic_json, ao_fingerprint, ao_sha256
 
 
 SEED = 2026
@@ -82,14 +80,6 @@ log(f"Versions: DuckDB {duckdb.__version__}, XGBoost {xgb.__version__}, Torch {t
 
 def sq(value):
     return "'" + str(value).replace("'", "''") + "'"
-
-
-def sha256_stream(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def con(memory=DUCKDB_MEMORY):
@@ -379,6 +369,7 @@ metrics = first + [validation_metric(t) for t in fine]
 best = max(metrics, key=lambda r: (r["macro_f05"], r["threshold"]))
 threshold = best["threshold"]
 validation_db.close()
+ao_atomic_json(WORK / "validation_summary.json", best)
 log(f"Validation: {best}")
 if best["candidate_link_recall"] < 0.98:
     log("WARNING: blocking recall below 98%; inspect missed links before a portal upload.")
@@ -390,27 +381,48 @@ def predict_one(source, gpu):
     booster.set_param({"device": f"cuda:{gpu}", "nthread": max(2, THREADS // 2)})
     best_iteration = booster.attr("best_iteration")
     prediction_rounds = int(best_iteration) + 1 if best_iteration is not None else booster.num_boosted_rounds()
+    model_hash = ao_sha256(model_paths[source])
     source_parts = [p for p in test_parts if p.name.startswith(source + "_")]
     accepted_files = []
     for part in source_parts:
         out = WORK / "accepted" / part.name
-        writer = pq.ParquetWriter(out, pa.schema([pa.field("qid", pa.string()), pa.field("tid", pa.string())]), compression="zstd")
-        accepted_count = 0
-        try:
-            reader = pq.ParquetFile(part)
+        partial = out.with_name(out.stem + ".partial.parquet")
+        marker = out.with_name(out.name + ".complete.json")
+        # Never present a partially scored partition as a completed checkpoint.
+        marker.unlink(missing_ok=True)
+        candidate_fingerprint = ao_fingerprint(part)
+        candidate_hash = ao_sha256(part)
+        accepted_count = scored_count = 0
+        with pq.ParquetFile(part) as reader, pq.ParquetWriter(
+            partial, pa.schema([pa.field("qid", pa.string()), pa.field("tid", pa.string())]),
+            compression="zstd",
+        ) as writer:
+            expected_rows = reader.metadata.num_rows
             for batch in reader.iter_batches(batch_size=200_000, columns=["qid", "tid"] + FEATURES):
                 frame = batch.to_pandas()
                 matrix = xgb.DMatrix(np.ascontiguousarray(frame[FEATURES].to_numpy(dtype=np.float32)), feature_names=FEATURES)
                 score = booster.predict(matrix, iteration_range=(0, prediction_rounds))
+                scored_count += len(frame)
                 keep = score >= threshold
                 if keep.any():
                     selected = frame.loc[keep, ["qid", "tid"]]
                     writer.write_table(pa.Table.from_pandas(selected, preserve_index=False))
                     accepted_count += len(selected)
+                    del selected
                 del frame, matrix, score
-            log(f"Inference {source} {part.name}: accepted {accepted_count:,}")
-        finally:
-            writer.close()
+        if scored_count != expected_rows or candidate_fingerprint != ao_fingerprint(part):
+            raise RuntimeError(f"Incomplete inference or changed candidates: {part}")
+        if ao_sha256(model_paths[source]) != model_hash:
+            raise RuntimeError(f"Model changed during inference: {source}")
+        os.replace(partial, out)
+        ao_atomic_json(marker, {
+            "candidate": candidate_fingerprint, "candidate_sha256": candidate_hash,
+            "scored_rows": scored_count,
+            "accepted_rows": accepted_count, "accepted_sha256": ao_sha256(out),
+            "model_file": model_paths[source].name, "model_sha256": model_hash,
+            "threshold": threshold, "prediction_rounds": prediction_rounds,
+        })
+        log(f"Inference {source} {part.name}: accepted {accepted_count:,}; checkpoint complete")
         accepted_files.append(out)
     return accepted_files
 
@@ -421,66 +433,12 @@ with ThreadPoolExecutor(max_workers=2) as pool:
     accepted_parts = f2.result() + f3.result()
 
 
-def write_wide(parts, out, id_column):
-    db = con()
-    try:
-        test_s1 = csv_source(DATA_ROOT / "test" / "test_source1.tsv")
-        files = parquet_files(parts)
-        db.execute(f"""
-          COPY (
-            WITH lists AS (
-              SELECT qid, string_agg(tid, ',' ORDER BY tid) AS ids
-              FROM read_parquet({files}) GROUP BY qid
-            )
-            SELECT s.entity_id AS source1_entity_id,
-              coalesce(l.ids, '') AS {id_column}
-            FROM {test_s1} s LEFT JOIN lists l ON s.entity_id = l.qid
-            ORDER BY s.entity_id
-          ) TO {sq(out)} (HEADER true, DELIMITER '\\t')
-        """)
-    finally:
-        db.close()
-
-
-write_wide(test_parts, OUTPUT / "candidate_pairs.tsv", "candidate_entity_ids")
-write_wide(accepted_parts, OUTPUT / "matching_results.tsv", "matched_entity_ids")
-
-
-def validate_wide_streaming():
-    candidate = OUTPUT / "candidate_pairs.tsv"
-    matching = OUTPUT / "matching_results.tsv"
-    expected = 0
-    with (DATA_ROOT / "test" / "test_source1.tsv").open(encoding="utf-8", newline="") as f:
-        expected = sum(1 for _ in f) - 1
-    rows = 0
-    with candidate.open(encoding="utf-8", newline="") as cf, matching.open(encoding="utf-8", newline="") as mf:
-        creader, mreader = csv.reader(cf, delimiter="\t"), csv.reader(mf, delimiter="\t")
-        assert next(creader) == ["source1_entity_id", "candidate_entity_ids"]
-        assert next(mreader) == ["source1_entity_id", "matched_entity_ids"]
-        previous = ""
-        for cr, mr in zip(creader, mreader):
-            assert len(cr) == len(mr) == 2
-            assert cr[0] == mr[0] and cr[0] > previous and cr[0].startswith("S1-")
-            cids = cr[1].split(",") if cr[1] else []
-            mids = mr[1].split(",") if mr[1] else []
-            assert len(cids) == len(set(cids)) and len(mids) == len(set(mids))
-            assert all(x.startswith(("S2-", "S3-")) for x in cids)
-            assert set(mids).issubset(cids)
-            previous = cr[0]
-            rows += 1
-        assert next(creader, None) is None and next(mreader, None) is None
-    assert rows == expected, (rows, expected)
-    log(f"Streaming output validation passed: {rows:,} unique Source 1 rows; matches subset of candidates")
-
-
-validate_wide_streaming()
-official_validator = DATA_ROOT.parent / "utils" / "validate_submission.py"
-if official_validator.exists():
-    # The supplied validator allows matching-only mode. Its candidate mode holds
-    # tens of millions of Python strings in RAM; streaming check above covers both.
-    subprocess.check_call([sys.executable, str(official_validator),
-                           "--matching", str(OUTPUT / "matching_results.tsv"),
-                           "--test-dir", str(DATA_ROOT / "test")])
+gc.collect()
+torch.cuda.empty_cache()
+assembly_result = assemble_outputs(
+    test_parts, accepted_parts, DATA_ROOT, WORK,
+    max_candidates_per_entity=2 * MAX_CANDIDATES_PER_SOURCE,
+)
 
 manifest = {
     "data_root": str(DATA_ROOT), "country_labels_train": train_countries,
@@ -493,10 +451,11 @@ manifest = {
     "max_token_df": MAX_TOKEN_DF, "max_exact_df": MAX_EXACT_DF,
     "max_token_keys_per_channel": MAX_TOKEN_KEYS_PER_CHANNEL,
     "max_candidates_per_source": MAX_CANDIDATES_PER_SOURCE,
-    "output": {p.name: {"bytes": p.stat().st_size,
-                          "sha256": sha256_stream(p)}
-               for p in (OUTPUT / "matching_results.tsv", OUTPUT / "candidate_pairs.tsv")},
+    "output": assembly_result["outputs"],
+    "output_validation": assembly_result["validation"],
+    "official_validator_run": assembly_result["official_validator_run"],
+    "assembly_version": assembly_result["assembly_version"],
 }
-(WORK / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+ao_atomic_json(WORK / "run_manifest.json", manifest)
 log(f"Finished. Upload only {OUTPUT / 'matching_results.tsv'} to the portal after review.")
 log(f"Final package also needs {OUTPUT / 'candidate_pairs.tsv'} and runnable code.")
