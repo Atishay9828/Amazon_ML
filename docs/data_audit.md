@@ -23,7 +23,7 @@ No source file had a blank name or country, malformed row, duplicate ID, or inco
 
 - 2,206,821 labeled Source 1 rows, covering every training Source 1 ID exactly once.
 - 7,638,365 positive links; no nonexistent target references and no cross-country positive links were found. This does **not** justify hard country filtering, especially because France appears only in test.
-- 123,247 true singletons (5.59% of Source 1). Maximum true matches per Source 1 is 11.
+- 123,247 true singletons (5.58% of Source 1, rounded from 5.5848%). Maximum true matches per Source 1 is 11.
 - Match-count distribution (0 through 11): 123,247; 119,157; 375,212; 530,841; 484,115; 321,957; 164,868; 63,968; 18,680; 4,205; 534; 37.
 
 ## Input fingerprints
@@ -66,3 +66,7 @@ The seeded 10,000-row Kaggle development job built the **complete** train Source
 Recapping the same staged retrieval at cap 16 yielded 160,000 pairs, 83.1435% true-link recall, and 0.923140 oracle macro F0.5. Cap 64 yielded 636,560 pairs, 88.2773% recall, and 0.953626 oracle macro F0.5. A diagnostic cap 128 yielded 1,114,940 pairs, 89.2436% recall, and 0.957544 oracle macro F0.5. The small gain from cap 64 to 128 shows that the retrieval proposal, not only the final cap, misses many true links. The 50,000-row holdout remains untouched while development diagnostics continue.
 
 Miss analysis of the diagnostic cap-128 table found 3,740 missed true links: 2,455 share at least one normalized name token **and** address token with their Source 1 record, 485 share a name token only, and 800 share an address token only. In 2,453 misses, that target source has fewer than its staged 64 candidates for the Source 1 record, indicating a proposal gap. In 1,287 misses, the target source is saturated at 64, so the staged per-source limit or ranking may be responsible. These categories are simple token overlap diagnostics, not proof that all such links can be recovered economically. The report with record examples stays outside Git at `D:\temp\amazon-ml-dev-misses.json`.
+
+### Independent 50,000-row holdout check
+
+The private Kaggle `amazon-ml-person-a-holdout-50k` run completed on the disjoint seeded 50,000 Source 1 selection, with the full 10,320,219 training targets and the same name K=32, address K=16, final cap 64 configuration. Its report recorded 172,581 true links, 3,182,916 candidate pairs, 88.1841% true-link recall, 72.45% complete-set coverage across all Source 1 records, and 0.951459 oracle macro F0.5. Mean candidates were 63.658 and p95 was 64. This is a retrieval check; it is not Person B's connected-component holdout or an actual matching score. The report was read once after development tuning, and no settings were chosen from its labels.
