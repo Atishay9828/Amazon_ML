@@ -147,6 +147,35 @@ class PersonATest(unittest.TestCase):
             self.assertIn(("S1-1", "S2-1"), [(row[0], row[1]) for row in rows])
             self.assertIn("name_char", rows[0][4].split("|"))
 
+    def test_second_hop_can_retrieve_neighbor_of_first_pass_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Grand Chemical Systems", "", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns, [
+                ("S2-1", "Grand Chemical Systems", "", "US"),
+                ("S2-2", "Grand Chemical Sytimes", "", "US"),
+            ])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Unrelated Industry", "", "US")])
+            base = Settings(name_k=1, address_k=0, cap=2, stage_cap=2,
+                            rare_max_df=0, rare_address_max_df=0, pair_max_df=1,
+                            cross_name_tokens=0, cross_address_tokens=0,
+                            indexed_grams=16, query_grams=32, min_index_df=2,
+                            hash_features=1 << 12,
+                            matrix_chunk=2, query_chunk=2)
+            plain, expanded = root / "plain.tsv", root / "expanded.tsv"
+            generate(root, "test", plain, root / "work-plain", base)
+            generate(root, "test", expanded, root / "work-expanded",
+                     Settings(**{**vars(base), "sibling_seeds": 1, "sibling_name_k": 2,
+                                 "sibling_address_k": 0}))
+            def read(path):
+                with path.open("r", encoding="utf-8", newline="") as handle:
+                    return {row[1]: row[4].split("|") for row in list(csv.reader(handle, delimiter="\t"))[1:]}
+            self.assertNotIn("S2-2", read(plain))
+            self.assertIn("sibling_name_char", read(expanded)["S2-2"])
+
     def test_stage_cutoff_curve_counts_ranked_links_before_final_cap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -140,6 +140,14 @@ from the retrieval manifest so final selection can be changed without
 recomputing retrieval. Keep the selected flag in the run instructions and use
 the resulting long-form table as the exact candidate set handed to B and C.
 
+An experimental same-source second hop is disabled by default. For a bounded
+development run, `--sibling-seeds 2 --sibling-name-k 16
+--sibling-address-k 8` queries the character-gram indexes using the two
+highest ranked first-pass candidates in each target source. It records
+`sibling_name_char` and `sibling_address_char` channels, and never reads
+ground-truth labels during inference. Use a fresh work directory and record
+its measured runtime and memory before considering it for full output.
+
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
 The current `assemble_staged.py` intentionally rejects that older work

@@ -34,7 +34,7 @@ except ImportError:
                                name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char")
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char")
 RETRIEVAL_VERSION = "name-key-1"
 
 
@@ -65,6 +65,9 @@ class Settings:
     single_max_df: int = 0
     single_tokens: int = 0
     name_keys: bool = False
+    sibling_seeds: int = 0
+    sibling_name_k: int = 16
+    sibling_address_k: int = 8
     workers: int = 1
 
 
@@ -449,6 +452,23 @@ def _run_chunk(chunk_number: int) -> int:
                 found[int(idx)].add("address_char")
             if not found:
                 continue
+            if settings.sibling_seeds:
+                initial_indices = np.fromiter(found, dtype=np.int32)
+                initial_name = state.name_index.target[initial_indices].dot(name_query[row_number].T).toarray().ravel()
+                initial_address = state.address_index.target[initial_indices].dot(address_query[row_number].T).toarray().ravel()
+                seed_order = sorted(range(len(initial_indices)), key=lambda position: (
+                    -_rank(float(initial_name[position]), float(initial_address[position]),
+                           "|".join(channel for channel in CHANNEL_ORDER
+                                    if channel in found[int(initial_indices[position])])),
+                    state.target_ids[int(initial_indices[position])]))
+                for position in seed_order[:settings.sibling_seeds]:
+                    seed = int(initial_indices[position])
+                    for idx in _best_field_hits(state.name_index, state.name_index.target[seed],
+                                                settings, settings.sibling_name_k):
+                        found[int(idx)].add("sibling_name_char")
+                    for idx in _best_field_hits(state.address_index, state.address_index.target[seed],
+                                                settings, settings.sibling_address_k):
+                        found[int(idx)].add("sibling_address_char")
             indices = np.fromiter(found, dtype=np.int32)
             name_scores = state.name_index.target[indices].dot(name_query[row_number].T).toarray().ravel()
             address_scores = state.address_index.target[indices].dot(address_query[row_number].T).toarray().ravel()
@@ -632,6 +652,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("gram_selection must be rarest or hash")
     if settings.final_score not in {"current", "balanced"}:
         raise ValueError("final_score must be current or balanced")
+    if settings.sibling_seeds < 0 or settings.sibling_name_k < 0 or settings.sibling_address_k < 0:
+        raise ValueError("sibling seed and neighbor budgets must be nonnegative")
     if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
             settings.single_max_df < 0 or settings.single_tokens < 0 or
             settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
@@ -719,6 +741,12 @@ def main() -> None:
                         help="Rare query words to probe per field for single-word proposals")
     parser.add_argument("--name-keys", action="store_true",
                         help="Try word-order-independent and compact website-style name keys")
+    parser.add_argument("--sibling-seeds", type=int, default=0,
+                        help="Use this many top first-pass candidates as same-source second-hop queries")
+    parser.add_argument("--sibling-name-k", type=int, default=16,
+                        help="Name neighbors retrieved from each sibling seed")
+    parser.add_argument("--sibling-address-k", type=int, default=8,
+                        help="Address neighbors retrieved from each sibling seed")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -744,7 +772,8 @@ def main() -> None:
                         cross_name_tokens=args.cross_name_tokens,
                         cross_address_tokens=args.cross_address_tokens,
                         single_max_df=args.single_max_df, single_tokens=args.single_tokens,
-                        name_keys=args.name_keys,
+                        name_keys=args.name_keys, sibling_seeds=args.sibling_seeds,
+                        sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
