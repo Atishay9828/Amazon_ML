@@ -11,10 +11,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+from scipy import sparse
+
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from candidates import HEADER, Settings, _choose_rows, _select_source1, evaluate_retrieval, generate
+from candidates import (HEADER, FieldIndex, Settings, _best_field_hits,
+                        _choose_rows, _select_source1, evaluate_retrieval, generate)
 from assemble_staged import assemble
 from aggregate_shard_reports import aggregate
 from data import Record, iter_records, iter_truth
@@ -34,6 +38,17 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
 
 
 class PersonATest(unittest.TestCase):
+    def test_hash_query_probe_uses_same_priority_as_target_index(self):
+        query = sparse.csr_matrix((np.ones(3, dtype=np.float32),
+                                   ([0, 0, 0], [1, 2, 3])), shape=(1, 4))
+        index = FieldIndex(None, None, None, None,
+                           np.array([0, 0, 1, 2, 3], dtype=np.int64),
+                           np.array([0, 1, 2], dtype=np.int32))
+        settings = Settings(query_grams=1, max_probe_df=3)
+        self.assertEqual(_best_field_hits(index, query, settings, 1).tolist(), [0])
+        hashed = Settings(**{**vars(settings), "gram_selection": "hash"})
+        self.assertEqual(_best_field_hits(index, query, hashed, 1).tolist(), [1])
+
     def test_cross_token_channel_recovers_name_and_address_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

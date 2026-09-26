@@ -212,7 +212,11 @@ def _best_field_hits(index: FieldIndex, query_row: sparse.csr_matrix,
     eligible = np.flatnonzero((sizes > 0) & (sizes <= settings.max_probe_df))
     if not len(eligible):
         return np.empty(0, dtype=np.int32)
-    order = np.lexsort((features[eligible], sizes[eligible]))[:settings.query_grams]
+    if settings.gram_selection == "hash":
+        priorities = features[eligible].astype(np.uint64) * np.uint64(11400714819323198485)
+        order = np.argsort(priorities, kind="stable")[:settings.query_grams]
+    else:
+        order = np.lexsort((features[eligible], sizes[eligible]))[:settings.query_grams]
     postings = []
     weights = []
     for position in eligible[order]:
