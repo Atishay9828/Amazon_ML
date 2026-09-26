@@ -34,7 +34,7 @@ except ImportError:
                                name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char")
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop")
 RETRIEVAL_VERSION = "name-key-1"
 
 
@@ -68,6 +68,8 @@ class Settings:
     sibling_seeds: int = 0
     sibling_name_k: int = 16
     sibling_address_k: int = 8
+    hop_seeds: int = 0
+    hop_k: int = 16
     workers: int = 1
 
 
@@ -473,6 +475,21 @@ def _run_chunk(chunk_number: int) -> int:
                     for idx in _best_field_hits(state.address_index, state.address_index.target[seed],
                                                 settings, settings.sibling_address_k):
                         found[int(idx)].add("sibling_address_char")
+            if settings.hop_seeds:
+                first = np.fromiter(found, dtype=np.int32)
+                first_name = state.name_index.target[first].dot(name_query[row_number].T).toarray().ravel()
+                first_address = state.address_index.target[first].dot(address_query[row_number].T).toarray().ravel()
+                strong = np.flatnonzero((first_name >= 0.8) &
+                                        ((first_address >= 0.6) | (first_name >= 0.95)))
+                order = np.lexsort((first[strong],
+                                    -(0.55 * first_name[strong] + 0.45 * first_address[strong])))
+                for seed in first[strong[order[:settings.hop_seeds]]]:
+                    for idx in _best_field_hits(state.name_index, state.name_index.target[int(seed)],
+                                                settings, settings.hop_k):
+                        found[int(idx)].add("second_hop")
+                    for idx in _best_field_hits(state.address_index, state.address_index.target[int(seed)],
+                                                settings, settings.hop_k // 2):
+                        found[int(idx)].add("second_hop")
             indices = np.fromiter(found, dtype=np.int32)
             name_scores = state.name_index.target[indices].dot(name_query[row_number].T).toarray().ravel()
             address_scores = state.address_index.target[indices].dot(address_query[row_number].T).toarray().ravel()
@@ -562,6 +579,8 @@ def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: in
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
     retrieval_settings = {key: value for key, value in vars(settings).items()
                           if key not in {"cap", "final_score", "workers"}}
+    if settings.gram_selection == "hash":
+        retrieval_settings["hash_query_order"] = "stable-v1"
     return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
             "shard_index": shard_index, "shard_count": shard_count,
@@ -658,6 +677,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("final_score must be current or balanced")
     if settings.sibling_seeds < 0 or settings.sibling_name_k < 0 or settings.sibling_address_k < 0:
         raise ValueError("sibling seed and neighbor budgets must be nonnegative")
+    if settings.hop_seeds < 0 or settings.hop_k < 0:
+        raise ValueError("hop seed and neighbor budgets must be nonnegative")
     if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
             settings.single_max_df < 0 or settings.single_tokens < 0 or
             settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
@@ -751,6 +772,10 @@ def main() -> None:
                         help="Name neighbors retrieved from each sibling seed")
     parser.add_argument("--sibling-address-k", type=int, default=8,
                         help="Address neighbors retrieved from each sibling seed")
+    parser.add_argument("--hop-seeds", type=int, default=0,
+                        help="Strong first-pass target rows to reuse as same-source queries")
+    parser.add_argument("--hop-k", type=int, default=16,
+                        help="Name neighbors per strong seed; address gets half this budget")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -778,6 +803,7 @@ def main() -> None:
                         single_max_df=args.single_max_df, single_tokens=args.single_tokens,
                         name_keys=args.name_keys, sibling_seeds=args.sibling_seeds,
                         sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
+                        hop_seeds=args.hop_seeds, hop_k=args.hop_k,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
