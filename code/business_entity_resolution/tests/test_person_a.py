@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import pickle
 import random
 import sys
 import tempfile
@@ -24,6 +25,8 @@ from aggregate_shard_reports import aggregate
 from data import Record, iter_records, iter_truth
 from merge_candidate_shards import merge
 from recap_candidates import recap
+from rank_candidates import (FEATURE_NAMES, FeatureContext, _retrieval_signature,
+                             features_for_group, infer as rank_infer, select_ranked)
 from reverse_top1 import run as run_reverse_top1
 from stage_cutoff_curve import curve
 from validate_candidate_long import validate
@@ -36,6 +39,12 @@ def write_tsv(path: Path, header: tuple[str, ...], rows: list[tuple[str, ...]]) 
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
+
+
+class NameScoreModel:
+    def predict_proba(self, features):
+        positive = features[:, FEATURE_NAMES.index("name_cosine")]
+        return np.column_stack((1 - positive, positive))
 
 
 class PersonATest(unittest.TestCase):
@@ -347,6 +356,75 @@ class PersonATest(unittest.TestCase):
         self.assertEqual(len(holdout), 2_000)
         self.assertFalse({record.entity_id for record in dev} & {record.entity_id for record in holdout})
         self.assertEqual([record.entity_id for record in dev], sorted(record.entity_id for record in dev))
+
+    def test_ranker_training_sample_excludes_dev_and_holdout(self):
+        records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(110_000)]
+        dev = {record.entity_id for record in _select_source1(records, "dev")}
+        holdout = {record.entity_id for record in _select_source1(records, "holdout")}
+        ranktrain = {record.entity_id for record in _select_source1(records, "ranktrain")}
+        self.assertEqual((len(dev), len(holdout), len(ranktrain)), (10_000, 50_000, 50_000))
+        self.assertFalse(dev & ranktrain or holdout & ranktrain)
+
+    def test_ranker_features_and_per_source_quota(self):
+        records = {
+            "S1-1": Record("S1-1", "Alpha Supply", "94th Main Road", "US"),
+            "S2-1": Record("S2-1", "Alpha Supply", "94nd Main Road", "US"),
+            "S2-2": Record("S2-2", "Alpha Supply", "9 Other Road", "US"),
+            "S3-1": Record("S3-1", "Alpha Supply", "94rd Main Road", "France"),
+        }
+        left = [("S1-1", "S2-1", "0.900000", "0.800000", "name_char"),
+                ("S1-1", "S2-2", "0.850000", "0.100000", "name_char")]
+        right = [("S1-1", "S3-1", "0.950000", "0.850000", "address_char")]
+        rows, matrix = features_for_group("S1-1", left, right, FeatureContext(records))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(matrix.shape, (3, len(FEATURE_NAMES)))
+        self.assertEqual(matrix[0, FEATURE_NAMES.index("num_any")], 1)
+        self.assertEqual(matrix[0, FEATURE_NAMES.index("country_eq")], 1)
+        self.assertEqual(matrix[2, FEATURE_NAMES.index("country_eq")], 0)
+        self.assertEqual([row[1] for row in select_ranked(
+            left, right, np.array([0.9, 0.8, 0.1]), 2)], ["S2-1", "S3-1"])
+        self.assertEqual([row[1] for row in select_ranked(
+            left, right, np.array([0.9, 0.8, 0.1]), 3)], ["S2-1", "S2-2", "S3-1"])
+
+    def test_ranker_inference_reads_both_staged_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Alpha Supply", "94th Main Road", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns, [
+                ("S2-1", "Alpha Supply", "94nd Main Road", "US"),
+                ("S2-2", "Other Supply", "9 Other Road", "US")])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Alpha Supply", "94rd Main Road", "France")])
+            stage = root / "work"
+            manifest = {"split": "test", "sample_split": None, "shard_index": 0,
+                        "shard_count": 1, "limit_source1": None, "limit_targets": None,
+                        "settings": {"stage_cap": 256, "query_chunk": 2,
+                                     "extra_pairs_sha256": None}}
+            stage.mkdir()
+            (stage / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            for source, rows in ((2, [
+                ("S1-1", "S2-1", "0.900000", "0.800000", "name_char"),
+                ("S1-1", "S2-2", "0.700000", "0.100000", "name_char")]),
+                                 (3, [("S1-1", "S3-1", "0.850000", "0.700000", "address_char")])):
+                path = stage / f"source{source}" / "part_000000.tsv.gz"
+                path.parent.mkdir()
+                with gzip.open(path, "wt", encoding="utf-8", newline="") as handle:
+                    writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                    writer.writerow(HEADER)
+                    writer.writerows(rows)
+            model_path = root / "model.pkl"
+            with model_path.open("wb") as handle:
+                pickle.dump({"model": NameScoreModel(), "feature_names": FEATURE_NAMES,
+                             "retrieval_signature": _retrieval_signature(manifest)}, handle)
+            out = root / "ranked.tsv"
+            report = rank_infer(root, "test", stage, model_path, out, 2)
+            self.assertEqual(report["candidate_pairs"], 2)
+            with out.open("r", encoding="utf-8", newline="") as handle:
+                rows = list(csv.reader(handle, delimiter="\t"))
+            self.assertEqual(tuple(rows[0]), HEADER)
+            self.assertEqual([row[1] for row in rows[1:]], ["S2-1", "S3-1"])
 
     def test_sorted_shards_partition_every_source1_record(self):
         records = [Record(f"S1-{i:05d}", "Name", "Address", "US") for i in range(101)]

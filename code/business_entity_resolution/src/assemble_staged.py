@@ -57,7 +57,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--cap", type=int, required=True)
     parser.add_argument("--final-score", choices=("current", "balanced"), default="current")
-    parser.add_argument("--sample-split", choices=("dev", "holdout"))
+    parser.add_argument("--sample-split", choices=("dev", "holdout", "ranktrain"))
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()

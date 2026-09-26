@@ -301,7 +301,16 @@ def _select_source1(source1: list[Record], sample_split: str | None,
         stop = len(source1) * (shard_index + 1) // shard_count
         return source1[start:stop]
     indices = random.Random(20260926).sample(range(len(source1)), min(60_000, len(source1)))
-    chosen = indices[:10_000] if sample_split == "dev" else indices[10_000:60_000]
+    if sample_split == "dev":
+        chosen = indices[:10_000]
+    elif sample_split == "holdout":
+        chosen = indices[10_000:60_000]
+    elif sample_split == "ranktrain":
+        excluded = set(indices)
+        available = [index for index in range(len(source1)) if index not in excluded]
+        chosen = random.Random(7).sample(available, min(50_000, len(available)))
+    else:
+        raise ValueError(f"unknown sample split: {sample_split}")
     return [source1[index] for index in sorted(chosen)]
 
 
@@ -822,8 +831,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
-    parser.add_argument("--sample-split", choices=("dev", "holdout"),
-                        help="Seeded disjoint 10k development or 50k holdout rows; train only")
+    parser.add_argument("--sample-split", choices=("dev", "holdout", "ranktrain"),
+                        help="Seeded disjoint dev 10k, holdout 50k, or ranker-training 50k rows; train only")
     parser.add_argument("--shard-index", type=int, default=0, help="Zero-based sorted Source 1 shard")
     parser.add_argument("--shard-count", type=int, default=1, help="Number of contiguous Source 1 shards")
     parser.add_argument("--report", type=Path, help="Write train retrieval metrics after full generation")
