@@ -53,6 +53,8 @@ class Settings:
     max_exact_block: int = 2_000
     indexed_grams: int = 8
     query_grams: int = 16
+    gram_selection: str = "rarest"
+    min_index_df: int = 1
     max_probe_df: int = 2_000
     cross_max_df: int = 1_000
     cross_name_tokens: int = 3
@@ -170,11 +172,18 @@ def _field_index(texts: list[str], settings: Settings) -> FieldIndex:
         features = matrix.indices[start:stop]
         if not len(features):
             continue
-        eligible = features[df[features] <= settings.max_probe_df]
+        eligible = features[(df[features] >= settings.min_index_df) &
+                            (df[features] <= settings.max_probe_df)]
         if not len(eligible):
             continue
         count = min(len(eligible), settings.indexed_grams)
-        selected = eligible[np.argpartition(df[eligible], count - 1)[:count]]
+        if settings.gram_selection == "hash":
+            # Stable bottom-k feature sampling avoids filling an index row
+            # solely with typo-induced, document-frequency-one grams.
+            priorities = eligible.astype(np.uint64) * np.uint64(11400714819323198485)
+        else:
+            priorities = df[eligible]
+        selected = eligible[np.argpartition(priorities, count - 1)[:count]]
         selected.sort()
         indexed_features[cursor:cursor + count] = selected
         indexed_rows[cursor:cursor + count] = row
@@ -229,7 +238,8 @@ def _format_score(value: float) -> str:
 
 
 def _memory_state() -> dict[str, float]:
-    """Optional process-memory telemetry without a runtime dependency."""
+    """Report parent-process and, when available, container-wide memory."""
+    state: dict[str, float] = {}
     try:
         import psutil
         info = psutil.Process().memory_info()
@@ -240,10 +250,24 @@ def _memory_state() -> dict[str, float]:
             peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             if os.uname().sysname == "Linux":
                 peak *= 1024
-        return {"rss_gb": round(info.rss / (1 << 30), 3),
-                "peak_rss_gb": round(peak / (1 << 30), 3)}
+        state.update({"rss_gb": round(info.rss / (1 << 30), 3),
+                      "peak_rss_gb": round(peak / (1 << 30), 3)})
     except ImportError:
-        return {}
+        pass
+    for key, paths in {
+        "container_current_gb": ("/sys/fs/cgroup/memory.current",
+                                 "/sys/fs/cgroup/memory/memory.usage_in_bytes"),
+        "container_peak_gb": ("/sys/fs/cgroup/memory.peak",
+                              "/sys/fs/cgroup/memory/memory.max_usage_in_bytes"),
+    }.items():
+        for path in paths:
+            try:
+                value = int(Path(path).read_text(encoding="ascii").strip())
+            except (OSError, ValueError):
+                continue
+            state[key] = round(value / (1 << 30), 3)
+            break
+    return state
 
 
 def _load_sorted_source1(path: Path, limit: int | None) -> list[Record]:
@@ -591,8 +615,11 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
              shard_count: int = 1) -> set[str] | None:
     if (settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or
             settings.stage_cap < 1 or settings.query_chunk < 1 or settings.workers < 1 or
-            settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
+            settings.indexed_grams < 1 or settings.query_grams < 1 or
+            settings.min_index_df < 1 or settings.max_probe_df < 1):
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
+    if settings.gram_selection not in {"rarest", "hash"}:
+        raise ValueError("gram_selection must be rarest or hash")
     if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
             settings.single_max_df < 0 or settings.single_tokens < 0 or
             settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
@@ -655,6 +682,10 @@ def main() -> None:
                         help="Maximum rare character grams posted per target field")
     parser.add_argument("--query-grams", type=int, default=16,
                         help="Maximum rare character grams probed per query field")
+    parser.add_argument("--gram-selection", choices=("rarest", "hash"), default="rarest",
+                        help="Choose target gram postings by rarest document frequency or stable hash")
+    parser.add_argument("--min-index-df", type=int, default=1,
+                        help="Minimum target frequency of indexed character grams")
     parser.add_argument("--max-probe-df", type=int, default=2_000,
                         help="Maximum target frequency of each probed character gram")
     parser.add_argument("--pair-max-df", type=int, default=1_000,
@@ -690,7 +721,8 @@ def main() -> None:
                         stage_cap=args.stage_cap,
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,
-                        query_grams=args.query_grams, max_probe_df=args.max_probe_df,
+                        query_grams=args.query_grams, gram_selection=args.gram_selection,
+                        min_index_df=args.min_index_df, max_probe_df=args.max_probe_df,
                         pair_max_df=args.pair_max_df, pair_max_hits=args.pair_max_hits,
                         cross_max_df=args.cross_max_df,
                         cross_name_tokens=args.cross_name_tokens,

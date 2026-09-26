@@ -1,0 +1,15 @@
+# External review triage — 26 Sep 2026
+
+The user relayed a Claude review of Person A. These are hypotheses and code observations, not measurements by our run unless separately verified. The experiment ledger and source reports in `docs/data_audit.md` remain the evidence for our performance. The full review correctly identified that our earlier description of links absent from staging as "never proposed" was unsupported: `_rank` cuts each source before writing staged files. Our audit and plan were corrected on 26 Sep.
+
+| Review item | Verified state | Next evidence needed |
+| --- | --- | --- |
+| Rarest character grams can over-index typos | Current best runs indexed 16 target grams and queried 32, improving the 10k result; stable-hash bottom-k and minimum-index-DF selection are implemented behind flags and passed a focused fixture, but have no full-target metric yet. | Same 10k IDs, full targets, final cap 64: rarest versus `--gram-selection hash`, then `--min-index-df 2` if warranted; compare staged/final recall and RAM. |
+| 1M hash buckets may collide | `--hash-features 8388608` run is active; the collision effect and recall gain are unmeasured. Larger hash spaces also enlarge feature-frequency, common-mask, and posting-offset arrays, not only one offset array. | Same-sample report, staged ceiling, runtime and RSS. |
+| Hand ranking and early shortlist cut | Broad-token run has 33,029 links after the first 64-per-source `_rank` cut and only 32,594 final at cap 64. `--stage-cap` is configurable; a 128-row shortlist experiment is running. The 1,741 links absent from 64-row staging may have been proposed and cut. | Run a diagnostic 2,048-per-source stage and compare ranked cutoff curves. A learned shortlist ranker must fit on separate labeled entities and be rechecked with B's matcher. |
+| Exact name and address keys | Optional sorted informative-name signature and compact website-name channels are implemented and an isolated run is active. Address numeric/ordinal and junk-token normalization are not implemented. | Isolated name-key metric and an address-key proposal study before adding more normalization. |
+| Sibling second hop | Not implemented. | Measure how often a missed target resembles a retrieved sibling, then benchmark a bounded two-hop channel without using labels for inference. |
+| Country bonus | No country term in current ranking. Train audit found zero cross-country true links, but test adds France. | Benchmark a small open-set same-country ranking bonus; never hard-filter a country. |
+| Miss diagnostic quota | Corrected to 32 per source at final cap 64, with shared remainder. A source count of 32 does not prove the missing link was proposed. | Use stage/final pair comparison for proposal-versus-ranking attribution. |
+
+All comparisons should use the seeded 10k development IDs and all 10,320,219 train targets unless explicitly labeled a different sample. The teammate's 99.84% on unknown 2k IDs remains unverified. Actual leaderboard F0.5 requires B's matcher; retrieval recall and oracle F0.5 are different metrics.

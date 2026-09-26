@@ -123,6 +123,28 @@ class PersonATest(unittest.TestCase):
             self.assertIn("name_signature", channels[("S1-1", "S2-1")])
             self.assertIn("compact_name", channels[("S1-2", "S2-2")])
 
+    def test_hash_selected_grams_recover_a_typo_without_word_channels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Grand Chemical Systems", "", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns,
+                      [("S2-1", "Grand Chemical Sytimes", "", "US")])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Unrelated Industry", "", "US")])
+            output = root / "pairs.tsv"
+            settings = Settings(name_k=2, address_k=0, rare_max_df=0,
+                                rare_address_max_df=0, cross_name_tokens=0,
+                                cross_address_tokens=0, gram_selection="hash",
+                                indexed_grams=16, query_grams=32,
+                                hash_features=1 << 12, matrix_chunk=2, query_chunk=2)
+            generate(root, "test", output, root / "work", settings)
+            with output.open("r", encoding="utf-8", newline="") as handle:
+                rows = list(csv.reader(handle, delimiter="\t"))[1:]
+            self.assertIn(("S1-1", "S2-1"), [(row[0], row[1]) for row in rows])
+            self.assertIn("name_char", rows[0][4].split("|"))
+
     def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
         rng = random.Random(24680)
         for case in range(100):
