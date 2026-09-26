@@ -9,7 +9,7 @@ This report summarizes the locally extracted challenge files. It contains no row
 
 The seven TSV files total approximately 2.52 GB. Every source file has `entity_id`, `business_name`, `business_address`, and `country`; the training ground truth has `source1_entity_id` and `matched_entity_ids`. IDs are unique within sources and do not overlap across the train and test splits. Every training Source 1 ID has exactly one ground-truth row. Every listed match points to a real training Source 2 or Source 3 ID, and no target ID appears in more than one ground-truth list.
 
-Training has **7,638,365 labeled links**: 3,693,619 to Source 2 and 3,944,746 to Source 3. There are 123,247 singleton Source 1 rows (5.59%), and the maximum observed match count is 11. Some 1,776,047 Source 1 rows (80.48%) link to both target sources. Approximately 1.34 million rows in each training target source are not listed as matches. All 7,638,365 labeled links have identical country labels on both sides.
+Training has **7,638,365 labeled links**: 3,693,619 to Source 2 and 3,944,746 to Source 3. There are 123,247 singleton Source 1 rows (5.58%), and the maximum observed match count is 11. Some 1,776,047 Source 1 rows (80.48%) link to both target sources. Approximately 1.34 million rows in each training target source are not listed as matches. All 7,638,365 labeled links have identical country labels on both sides.
 
 Train contains US and India. Test also contains France, with **259,452 French Source 1 rows** (about 15% of test Source 1). Source 1 names and addresses are present. Target addresses are blank in roughly 3.3% of the training target records and 2.7% of the test target records.
 

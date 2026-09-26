@@ -2,7 +2,7 @@
 
 **Purpose:** This README is the team’s shared reference for the challenge statement, organizer instructions, examples, constraints, known ambiguities, and our engineering workflow.
 
-**Status:** The challenge context is documented and a three-person execution plan is ready for review. No challenge dataset, implementation, measured result, or submission is in this repository yet.
+**Status (26 September 2026):** The repository contains experimental notebooks, preprocessing diagnostics, and reported retrieval/model results. Some experiment files are uncommitted, and reported Kaggle output assembly has not been independently checked here; the organizer validator and portal/leaderboard status remain unverified. See the [current end-to-end plan](docs/amazon-ml-end-to-end-plan.md) for the evidence ledger and next gates.
 
 **Source basis:** Participant-provided problem statement screenshots, event-instruction screenshots, and screenshots of the challenge video. This file is a structured summary; where the supplied materials disagree or are unclear, the issue is called out rather than silently resolved.
 
