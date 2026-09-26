@@ -70,3 +70,11 @@ Miss analysis of the diagnostic cap-128 table found 3,740 missed true links: 2,4
 ### Independent 50,000-row holdout check
 
 The private Kaggle `amazon-ml-person-a-holdout-50k` run completed on the disjoint seeded 50,000 Source 1 selection, with the full 10,320,219 training targets and the same name K=32, address K=16, final cap 64 configuration. Its report recorded 172,581 true links, 3,182,916 candidate pairs, 88.1841% true-link recall, 72.45% complete-set coverage across all Source 1 records, and 0.951459 oracle macro F0.5. Mean candidates were 63.658 and p95 was 64. This is a retrieval check; it is not Person B's connected-component holdout or an actual matching score. The report was read once after development tuning, and no settings were chosen from its labels.
+
+### Larger-neighbor development comparison
+
+The private Kaggle `amazon-ml-person-a-dev-k64-a32` run used the **same** seeded 10,000 Source 1 IDs and complete 10,320,219 training targets as the baseline, with 64 name neighbors and 32 address neighbors per target source. At final cap 64 it retrieved 31,047/34,770 true links (89.2925%), emitted 640,000 pairs, and reached 0.957808 oracle macro F0.5. Peak reported process RSS was 20.113 GiB. The baseline at the same cap retrieved 30,694/34,770 links (88.2773%) and reached 0.953626 oracle macro F0.5. This gain is measurable but still leaves 3,723 true links unseen on development. A separate cross-field token experiment is running; no final setting has been selected from these numbers.
+
+### Full-test baseline artifact
+
+All four private Kaggle test shards of the baseline K32/A16, cap-64 configuration completed. Their sorted long-form TSVs were merged outside Git to `D:\temp\amazon-ml-test-cap64.tsv`. The local `validate_candidate_long.py` command exited 0 over the merged 6.32 GB file: 110,336,665 unique sorted pairs, 1,732,543 represented test Source 1 IDs, cap 64, and all target IDs valid. One test Source 1 record has zero candidates and therefore no row in this long-form handoff; the final wide `candidate_pairs.tsv` must include every one of the 1,732,544 test Source 1 IDs, including an empty list for that record. This artifact is a validated fallback pending retrieval selection, not a matching result.
