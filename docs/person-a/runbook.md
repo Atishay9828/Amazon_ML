@@ -48,14 +48,17 @@ cap 64 to 32 or 16, run:
 python code/business_entity_resolution/src/evaluate_candidate_file.py --input D:\temp\person-a-dev-cap32.tsv --data-root '..\student_resource\dataset' --sample-split dev --out D:\temp\person-a-dev-cap32-report.json
 ```
 
-The retrieval source now also contains an **experimental** `cross_token`
-channel: it intersects compact name-token and address-token postings with a
-1,000-document-frequency probe ceiling. `RETRIEVAL_VERSION` separates these
-checkpoints from the older baseline. The private
-`amazon-ml-person-a-dev-cross-token` job uses the same seeded 10k development
-Source 1 IDs, full train targets, and cap 64; its output must be measured
-before selecting it for full train/test generation. Do not combine old staged
-parts with the new version.
+The retrieval source contains **experimental** token channels. `cross_token`
+intersects compact name-token and address-token postings with a
+1,000-document-frequency probe ceiling. `name_pair` and `address_pair` propose
+records sharing two informative words within one field, including cases where
+the other field is absent or entirely different. `RETRIEVAL_VERSION` separates
+these checkpoints from the older baseline and cross-token-only version. The
+private `amazon-ml-person-a-dev-cross-token` and
+`amazon-ml-person-a-dev-word-pair` jobs use the same seeded 10k development
+Source 1 IDs, full train targets, and cap 64; their outputs must be measured
+before selecting either for full train/test generation. Do not combine staged
+parts across retrieval versions.
 
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.

@@ -32,8 +32,8 @@ except ImportError:
     from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "cross_token", "name_char", "address_char")
-RETRIEVAL_VERSION = "cross-token-1"
+CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "name_char", "address_char")
+RETRIEVAL_VERSION = "word-pair-1"
 
 
 @dataclass(frozen=True)
@@ -94,6 +94,24 @@ class TokenIndex:
                                      self.posting_offsets[features[position] + 1]]
                     for position in eligible[order]]
         return np.unique(np.concatenate(postings))
+
+    def pair_probe(self, query_row: sparse.csr_matrix, limit: int, max_df: int) -> np.ndarray:
+        """Find targets sharing two informative query words in this field."""
+        features = query_row.indices
+        if len(features) < 2 or limit < 2:
+            return np.empty(0, dtype=np.int32)
+        sizes = self.posting_offsets[features + 1] - self.posting_offsets[features]
+        eligible = np.flatnonzero((sizes > 0) & (sizes <= max_df))
+        if len(eligible) < 2:
+            return np.empty(0, dtype=np.int32)
+        positions = eligible[np.lexsort((features[eligible], sizes[eligible]))[:limit]]
+        postings = [self.posting_rows[self.posting_offsets[features[position]]:
+                                     self.posting_offsets[features[position] + 1]]
+                    for position in positions]
+        intersections = [np.intersect1d(postings[i], postings[j], assume_unique=True)
+                         for i in range(len(postings)) for j in range(i + 1, len(postings))]
+        hits = [rows for rows in intersections if len(rows)]
+        return np.unique(np.concatenate(hits)) if hits else np.empty(0, dtype=np.int32)
 
 
 def _token_index(texts: list[str], settings: Settings, informative_tokens) -> TokenIndex:
@@ -342,6 +360,12 @@ def _run_chunk(chunk_number: int) -> int:
                                                  settings.cross_name_tokens, settings.cross_max_df)
             cross_address = state.address_tokens.probe(address_token_query[row_number],
                                                        settings.cross_address_tokens, settings.cross_max_df)
+            for idx in state.name_tokens.pair_probe(name_token_query[row_number],
+                                                    settings.cross_name_tokens, settings.cross_max_df):
+                found[int(idx)].add("name_pair")
+            for idx in state.address_tokens.pair_probe(address_token_query[row_number],
+                                                       settings.cross_address_tokens, settings.cross_max_df):
+                found[int(idx)].add("address_pair")
             if len(cross_name) and len(cross_address):
                 for idx in np.intersect1d(cross_name, cross_address, assume_unique=True):
                     found[int(idx)].add("cross_token")
