@@ -1,5 +1,45 @@
 # Person A candidate generation runbook
 
+## Configured pipeline (use this for handoff files)
+
+`src/run_pipeline.py` runs every step from one configuration file. Use
+`configs/final.json` for all handoff files. Do not set retrieval flags by hand.
+
+1. The pipeline builds the reverse files for the split: `reverse-<split>.tsv`
+   (top-1 on name and address) and `reverse-blank-<split>.tsv` (top-k on the
+   name, only for targets without an address). Each file has a `.meta.json`
+   with the split, the Source 1 SHA-256, and the reverse settings.
+2. The pipeline stages the `ranktrain` sample (50,000 train Source 1 records
+   outside dev and holdout) and trains the ranker. The model file name has
+   the first 16 characters of the configuration hash.
+3. The pipeline stages the requested split and applies the ranker at
+   `ranker.final_cap`.
+
+A later run with the same configuration reuses matching reverse files, staged
+chunks, and models. A reverse file stays valid when only the `candidates` or
+`ranker` sections change, because its check uses the reverse settings only.
+To reuse files from another machine, pass `--reverse-train`, `--reverse-test`,
+or `--model` with the file and its `.meta.json`.
+
+Development check (reports staged recall, learned recall at caps 16/32/64,
+and the `_rank` control):
+
+```bash
+python code/business_entity_resolution/src/run_pipeline.py --config code/business_entity_resolution/configs/final.json --data-root <dataset> --split train --sample-split dev --work-dir <work> --out <work>/dev.tsv
+```
+
+Test in four shards, then merge:
+
+```bash
+python code/business_entity_resolution/src/run_pipeline.py --config code/business_entity_resolution/configs/final.json --data-root <dataset> --split test --work-dir <work> --model <ranker.pkl> --reverse-test <reverse-test.tsv> --shard-index 0 --shard-count 4 --out <work>/results/test-0-of-4.tsv
+python code/business_entity_resolution/src/run_pipeline.py --config code/business_entity_resolution/configs/final.json --split test --work-dir <work> --shard-count 4 --merge-shards --out <work>/test-long.tsv
+```
+
+The measured decisions for each configuration value are in
+`docs/person-a/independent-review.md` and in the `_notes` fields of
+`configs/final.json`. The sections below describe the older single-script
+workflow and remain valid for historical runs.
+
 This is the long-form candidate table handed to Person B for scoring. The
 official wide-format `candidate_pairs.tsv` and `matching_results.tsv` are
 assembled by Person C. No official data, candidate output, or credentials
