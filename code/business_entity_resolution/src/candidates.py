@@ -26,14 +26,16 @@ from sklearn.feature_extraction.text import HashingVectorizer, TfidfTransformer
 
 try:  # permit both `python -m src.candidates` and direct script execution
     from .data import Record, iter_records, iter_truth, source_path
-    from .normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
+    from .normalization import (compact_name, informative_address_tokens, informative_name_tokens,
+                                name_token_signature, normalize_address, normalize_name)
 except ImportError:
     from data import Record, iter_records, iter_truth, source_path
-    from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
+    from normalization import (compact_name, informative_address_tokens, informative_name_tokens,
+                               name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char")
-RETRIEVAL_VERSION = "broad-token-1"
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char")
+RETRIEVAL_VERSION = "name-key-1"
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ class Settings:
     pair_max_hits: int = 0
     single_max_df: int = 0
     single_tokens: int = 0
+    name_keys: bool = False
     workers: int = 1
 
 
@@ -213,7 +216,8 @@ def _best_field_hits(index: FieldIndex, query_row: sparse.csr_matrix,
 def _rank(name: float, address: float, channels: str) -> float:
     selected = set(channels.split("|"))
     return (0.55 * name + 0.45 * address + 0.12 * ("exact_name" in selected)
-            + 0.08 * ("exact_address" in selected) + 0.02 * ("rare_name" in selected)
+            + 0.08 * ("exact_address" in selected) + 0.08 * ("name_signature" in selected)
+            + 0.04 * ("compact_name" in selected) + 0.02 * ("rare_name" in selected)
             + 0.02 * ("rare_address" in selected))
 
 
@@ -261,12 +265,22 @@ def _select_source1(source1: list[Record], sample_split: str | None,
 def _build_lookups(names: list[str], addresses: list[str], settings: Settings):
     exact_names: dict[str, list[int]] = defaultdict(list)
     exact_addresses: dict[str, list[int]] = defaultdict(list)
+    name_signatures: dict[str, list[int]] = defaultdict(list)
+    compact_names: dict[str, list[int]] = defaultdict(list)
     frequencies: Counter[str] = Counter()
     address_frequencies: Counter[str] = Counter()
     for idx, (name, address) in enumerate(zip(names, addresses, strict=True)):
         if name:
             exact_names[name].append(idx)
             frequencies.update(informative_name_tokens(name))
+            if settings.name_keys:
+                signature = name_token_signature(name)
+                if signature:
+                    name_signatures[signature].append(idx)
+                compact = compact_name(name)
+                if len(compact) >= 8 and (len(name.split()) == 1 or name.startswith("www ") or
+                                           name.endswith((" com", " net", " org", " in"))):
+                    compact_names[compact].append(idx)
         if address:
             exact_addresses[address].append(idx)
             address_frequencies.update(informative_address_tokens(address))
@@ -280,7 +294,8 @@ def _build_lookups(names: list[str], addresses: list[str], settings: Settings):
         for token in informative_address_tokens(address):
             if address_frequencies[token] <= settings.rare_address_max_df:
                 rare_address[token].append(idx)
-    return exact_names, exact_addresses, rare, frequencies, rare_address, address_frequencies
+    return (exact_names, exact_addresses, name_signatures, compact_names,
+            rare, frequencies, rare_address, address_frequencies)
 
 
 def _part_path(work_dir: Path, source: int, chunk_number: int) -> Path:
@@ -306,6 +321,8 @@ class _RetrievalState:
     target_ids: list[str]
     exact_names: dict[str, list[int]]
     exact_addresses: dict[str, list[int]]
+    name_signatures: dict[str, list[int]]
+    compact_names: dict[str, list[int]]
     rare_names: dict[str, list[int]]
     name_frequencies: Counter[str]
     rare_addresses: dict[str, list[int]]
@@ -352,6 +369,15 @@ def _run_chunk(chunk_number: int) -> int:
             if address and len(state.exact_addresses.get(address, ())) <= settings.max_exact_block:
                 for idx in state.exact_addresses.get(address, ()):
                     found[idx].add("exact_address")
+            if settings.name_keys and name:
+                signature = name_token_signature(name)
+                if signature and len(state.name_signatures.get(signature, ())) <= settings.max_exact_block:
+                    for idx in state.name_signatures.get(signature, ()):
+                        found[idx].add("name_signature")
+                compact = compact_name(name)
+                if len(compact) >= 8 and len(state.compact_names.get(compact, ())) <= settings.max_exact_block:
+                    for idx in state.compact_names.get(compact, ()):
+                        found[idx].add("compact_name")
             tokens = informative_name_tokens(name)
             for token in sorted((t for t in tokens if t in state.rare_names),
                                 key=lambda t: (state.name_frequencies[t], t))[:3]:
@@ -423,7 +449,8 @@ def _retrieve_source(
     target_ids = [record.entity_id for record in targets]
     names = [normalize_name(record.business_name) for record in targets]
     addresses = [normalize_address(record.business_address) for record in targets]
-    exact_names, exact_addresses, rare, frequencies, rare_address, address_frequencies = _build_lookups(names, addresses, settings)
+    (exact_names, exact_addresses, name_signatures, compact_names,
+     rare, frequencies, rare_address, address_frequencies) = _build_lookups(names, addresses, settings)
     name_index = _field_index(names, settings)
     address_index = _field_index(addresses, settings)
     name_tokens = _token_index(names, settings, informative_name_tokens)
@@ -431,7 +458,8 @@ def _retrieve_source(
     print(json.dumps({"stage": "target_index", "source": source, "targets": len(targets),
                       "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
     del targets, names, addresses
-    _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses, rare,
+    _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses,
+                                  name_signatures, compact_names, rare,
                                   frequencies, rare_address, address_frequencies,
                                   name_index, address_index, name_tokens, address_tokens,
                                   settings, work_dir, source)
@@ -641,6 +669,8 @@ def main() -> None:
                         help="Maximum target frequency for single-word proposals; zero disables them")
     parser.add_argument("--single-tokens", type=int, default=0,
                         help="Rare query words to probe per field for single-word proposals")
+    parser.add_argument("--name-keys", action="store_true",
+                        help="Try word-order-independent and compact website-style name keys")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -663,6 +693,7 @@ def main() -> None:
                         cross_name_tokens=args.cross_name_tokens,
                         cross_address_tokens=args.cross_address_tokens,
                         single_max_df=args.single_max_df, single_tokens=args.single_tokens,
+                        name_keys=args.name_keys,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
