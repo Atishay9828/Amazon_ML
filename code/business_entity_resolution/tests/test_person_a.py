@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import random
 import sys
 import tempfile
@@ -14,6 +15,7 @@ sys.path.insert(0, str(SRC))
 
 from candidates import HEADER, Settings, _choose_rows, _select_source1, evaluate_retrieval, generate
 from assemble_staged import assemble
+from aggregate_shard_reports import aggregate
 from data import Record, iter_records, iter_truth
 from merge_candidate_shards import merge
 from recap_candidates import recap
@@ -204,6 +206,42 @@ class PersonATest(unittest.TestCase):
             self.assertAlmostEqual(report["true_link_recall"], 1 / 3)
             self.assertAlmostEqual(report["oracle_macro_f0_5"], (1.25 * 0.5 / 0.75 + 1) / 3)
             self.assertEqual(report["zero_candidate_rows"], 2)
+
+    def test_aggregate_shard_reports_uses_link_and_entity_denominators(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "train" / "train_source1.tsv", columns,
+                      [(f"S1-{index}", "Name", "Address", "US") for index in range(1, 5)])
+            write_tsv(root / "train" / "train_ground_truth.tsv",
+                      ("source1_entity_id", "matched_entity_ids"),
+                      [("S1-1", "S2-1,S3-1"), ("S1-2", ""),
+                       ("S1-3", "S2-3"), ("S1-4", "")])
+            reports = [
+                {"source1_rows": 2, "true_links": 2, "candidate_pairs": 3,
+                 "true_link_recall": 0.5, "complete_set_coverage_all": 0.5,
+                 "complete_set_coverage_nonempty": 0.0,
+                 "oracle_macro_f0_5": (1.25 * 0.5 / 0.75 + 1) / 2,
+                 "candidate_p95": 2, "zero_candidate_rows": 0},
+                {"source1_rows": 2, "true_links": 1, "candidate_pairs": 3,
+                 "true_link_recall": 1.0, "complete_set_coverage_all": 1.0,
+                 "complete_set_coverage_nonempty": 1.0,
+                 "oracle_macro_f0_5": 1.0, "candidate_p95": 2,
+                 "zero_candidate_rows": 0},
+            ]
+            paths = [root / f"report-{index}.json" for index in range(2)]
+            for path, report in zip(paths, reports, strict=True):
+                path.write_text(json.dumps(report), encoding="utf-8")
+            result = aggregate(root, paths, target_count=6, cap=2)
+            self.assertEqual(result["covered_true_links"], 2)
+            self.assertAlmostEqual(result["true_link_recall"], 2 / 3)
+            self.assertAlmostEqual(result["complete_set_coverage_all"], 3 / 4)
+            self.assertAlmostEqual(result["complete_set_coverage_nonempty"], 1 / 2)
+            self.assertAlmostEqual(result["oracle_macro_f0_5"],
+                                   ((1.25 * 0.5 / 0.75 + 1) + 2) / 4)
+            self.assertEqual(result["candidate_p95"], 2)
+            self.assertEqual(result["singleton_rows"], 2)
+            self.assertAlmostEqual(result["pair_reduction_ratio"], 1 - 6 / 24)
 
 
 if __name__ == "__main__":

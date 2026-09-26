@@ -52,6 +52,20 @@ cap 64 to 32 or 16, run:
 python code/business_entity_resolution/src/evaluate_candidate_file.py --input D:\temp\person-a-dev-cap32.tsv --data-root '..\student_resource\dataset' --sample-split dev --out D:\temp\person-a-dev-cap32-report.json
 ```
 
+For full labeled training in four sorted shards, each Kaggle `train-N-of-4`
+kernel writes `person-a-train-N-of-4-report.json` and a log. Download all four
+reports/logs and aggregate with exact link and entity denominators:
+
+```powershell
+python code/business_entity_resolution/src/aggregate_shard_reports.py --data-root '..\student_resource\dataset' --reports D:\temp\train-0-report.json D:\temp\train-1-report.json D:\temp\train-2-report.json D:\temp\train-3-report.json --target-count 10320219 --cap 64 --logs D:\temp\train-0.log D:\temp\train-1.log D:\temp\train-2.log D:\temp\train-3.log --out D:\temp\person-a-full-train-report.json
+```
+
+The aggregator checks that each report's Source 1 and true-link counts match
+its disjoint shard before combining recall, complete-set coverage, oracle
+macro F0.5, candidate volume, reduction ratio, and resource telemetry. It
+reports global p95 when every shard has p95 equal to the common hard cap;
+otherwise full candidate-count histograms are needed for an exact global p95.
+
 The retrieval source contains **experimental** token channels. `cross_token`
 intersects compact name-token and address-token postings with a
 1,000-document-frequency probe ceiling. `name_pair` and `address_pair` propose
