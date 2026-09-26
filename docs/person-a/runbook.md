@@ -30,8 +30,11 @@ same retrieved rows can be reassembled at caps 16, 32, or 64. Use a fresh work
 directory if any retrieval setting or input changes; the manifest guards this.
 The CLI also exposes `--indexed-grams`, `--query-grams`, and `--max-probe-df`
 for bounded character-gram retrieval experiments; defaults are 8, 16, and
-2,000. The private `amazon-ml-person-a-dev-word-pair-grams16` run tests 16
-indexed and 32 query grams while keeping the other settings and sample fixed.
+2,000. `--stage-cap` (default 64) controls the per-source shortlist before
+the final `--cap`. `--pair-max-df`, `--cross-max-df`,
+`--cross-name-tokens`, `--cross-address-tokens`, `--single-max-df`,
+`--single-tokens`, and `--name-keys` control optional word channels. Keep
+the exact settings from the chosen measured run in B/C's handoff.
 
 For a full run that may exceed one Kaggle session, use `--shard-count 4` and
 `--shard-index 0`, `1`, `2`, or `3` in four separate kernels. Shards are
@@ -83,9 +86,12 @@ The private `amazon-ml-person-a-dev-broad-token` development run enables them
 with `--single-max-df 512 --single-tokens 2`, raises the same-field pair word
 frequency ceiling to `--pair-max-df 5000`, limits any one word-pair intersection
 to `--pair-max-hits 2000`, and also uses 16 indexed / 32 query character grams.
-It remains an experiment until its 10k full-target recall and resource use are
-measured. The full-training word-pair shards were started with the earlier
-defaults and are a separate all-label measurement, not the broad-token result.
+It measured 32,594/34,770 true links (93.7417%) at the final cap of 64 and
+33,029/34,770 (94.9928%) in the staged shortlist on the fixed 10k development
+IDs and full train targets. The full-training word-pair shards were started
+with the earlier defaults and are a separate all-label measurement, not the
+broad-token result. `--name-keys` remains experimental while its isolated
+Kaggle development run completes.
 
 To measure the staged proposal ceiling for a downloaded development run,
 download all `person-a-dev.work/source2/part_*.tsv.gz` and
