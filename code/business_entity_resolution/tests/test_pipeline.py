@@ -164,5 +164,36 @@ class RunPipelineTest(unittest.TestCase):
                 run_pipeline(other, data, "test", root / "work", root / "pairs-other.tsv")
 
 
+class ExportWideTest(unittest.TestCase):
+    def test_every_source1_gets_one_row_including_empty(self):
+        from export_wide import export
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_split(root, "test")
+            long_path = root / "long.tsv"
+            long_path.write_text("\t".join(HEADER) + "\n"
+                                 "S1-1\tS2-1\t0.9\t0.8\tname_char\n"
+                                 "S1-1\tS3-2\t0.7\t0.0\treverse_blank_name\n"
+                                 "S1-3\tS3-1\t0.9\t0.9\texact_address\n", encoding="utf-8")
+            report = export(long_path, root, "test", root / "candidate_pairs.tsv")
+            self.assertEqual((report["source1_rows"], report["candidate_pairs"], report["empty_rows"]), (3, 3, 1))
+            rows = [line.split("\t") for line in
+                    (root / "candidate_pairs.tsv").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(rows[0], ["source1_entity_id", "candidate_entity_ids"])
+            self.assertEqual({row[0]: row[1] for row in rows[1:]},
+                             {"S1-1": "S2-1,S3-2", "S1-3": "S3-1", "S1-2": ""})
+
+    def test_unsorted_long_form_is_rejected(self):
+        from export_wide import export
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_split(root, "test")
+            long_path = root / "long.tsv"
+            long_path.write_text("\t".join(HEADER) + "\nS1-3\tS3-1\t0\t0\tx\nS1-1\tS2-1\t0\t0\tx\n",
+                                 encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "sorted"):
+                export(long_path, root, "test", root / "out.tsv")
+
+
 if __name__ == "__main__":
     unittest.main()
