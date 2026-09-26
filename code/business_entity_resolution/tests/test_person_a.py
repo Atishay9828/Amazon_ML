@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 import random
 import sys
@@ -19,6 +20,7 @@ from aggregate_shard_reports import aggregate
 from data import Record, iter_records, iter_truth
 from merge_candidate_shards import merge
 from recap_candidates import recap
+from stage_cutoff_curve import curve
 from validate_candidate_long import validate
 from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
@@ -144,6 +146,28 @@ class PersonATest(unittest.TestCase):
                 rows = list(csv.reader(handle, delimiter="\t"))[1:]
             self.assertIn(("S1-1", "S2-1"), [(row[0], row[1]) for row in rows])
             self.assertIn("name_char", rows[0][4].split("|"))
+
+    def test_stage_cutoff_curve_counts_ranked_links_before_final_cap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "train" / "train_source1.tsv", columns,
+                      [("S1-1", "Example", "Address", "US")])
+            write_tsv(root / "train" / "train_ground_truth.tsv",
+                      ("source1_entity_id", "matched_entity_ids"), [("S1-1", "S2-2")])
+            stage = root / "stage"
+            for source, rows in ((2, [
+                ("S1-1", "S2-1", "0.900000", "0.000000", "name_char"),
+                ("S1-1", "S2-2", "0.800000", "0.000000", "name_char")]),
+                                 (3, [])):
+                part = stage / f"source{source}" / "part_000000.tsv.gz"
+                part.parent.mkdir(parents=True, exist_ok=True)
+                with gzip.open(part, "wt", encoding="utf-8", newline="") as handle:
+                    writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+                    writer.writerow(HEADER)
+                    writer.writerows(rows)
+            report = curve(stage, root, "dev", [1, 2])
+            self.assertEqual([item["covered_true_links"] for item in report["cutoffs_per_source"]], [0, 1])
 
     def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
         rng = random.Random(24680)

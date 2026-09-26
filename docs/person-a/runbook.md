@@ -108,6 +108,18 @@ current retrieval version because it only counts the staged pairs and their
 ground-truth coverage. Keep the corresponding kernel ID and settings with the
 report so versions are never conflated.
 
+To compare first-cut ranking depths from a run that staged **at least** the
+largest requested cutoff per source, run:
+
+```powershell
+python code/business_entity_resolution/src/stage_cutoff_curve.py --work-dir D:\temp\downloaded-stage\person-a-dev.work --data-root '..\student_resource\dataset' --sample-split dev --cutoffs 64 128 256 512 2048 --out D:\temp\downloaded-stage-curve.json
+```
+
+The score order is reconstructed from the six-decimal cosine values saved in
+stage rows, so near-ties can differ from the original full-precision order.
+The report is a curve **after** the proposal channels and `_rank`; even a
+2,048-row cutoff does not prove that all raw proposals were saved.
+
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
 The current `assemble_staged.py` intentionally rejects that older work
