@@ -168,6 +168,8 @@ class PersonATest(unittest.TestCase):
                     writer.writerows(rows)
             report = curve(stage, root, "dev", [1, 2])
             self.assertEqual([item["covered_true_links"] for item in report["cutoffs_per_source"]], [0, 1])
+            self.assertEqual(report["source_groups_with_candidates"], 1)
+            self.assertEqual(report["source_groups_at_largest_cutoff"], 1)
 
     def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
         rng = random.Random(24680)

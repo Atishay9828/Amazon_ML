@@ -31,6 +31,8 @@ def curve(work_dir: Path, data_root: Path, sample_split: str,
     link_counts = {cutoff: 0 for cutoff in cutoffs}
     pair_counts = {cutoff: 0 for cutoff in cutoffs}
     largest_group = 0
+    groups_with_candidates = 0
+    groups_at_largest_cutoff = 0
     for source in (2, 3):
         parts = sorted((work_dir / f"source{source}").glob("part_*.tsv.gz"))
         if not parts or [part.name for part in parts] != [f"part_{i:06d}.tsv.gz" for i in range(len(parts))]:
@@ -50,6 +52,8 @@ def curve(work_dir: Path, data_root: Path, sample_split: str,
                     if (any(len(row) != 5 or not row[1].startswith(f"S{source}-") for row in rows)
                             or len(set(target_ids)) != len(rows)):
                         raise ValueError(f"{part}: invalid or duplicate target")
+                    groups_with_candidates += 1
+                    groups_at_largest_cutoff += len(rows) >= cutoffs[-1]
                     largest_group = max(largest_group, len(rows))
                     ranked = sorted(rows, key=lambda row: (-_rank(float(row[2]), float(row[3]), row[4]), row[1]))
                     for cutoff in cutoffs:
@@ -57,7 +61,10 @@ def curve(work_dir: Path, data_root: Path, sample_split: str,
                         pair_counts[cutoff] += len(prefix)
                         link_counts[cutoff] += sum(row[1] in truth[entity_id] for row in prefix)
     links = sum(map(len, truth.values()))
-    return {"source1_rows": len(ids), "true_links": links, "largest_staged_source_group": largest_group,
+    return {"source1_rows": len(ids), "true_links": links,
+            "largest_staged_source_group": largest_group,
+            "source_groups_with_candidates": groups_with_candidates,
+            "source_groups_at_largest_cutoff": groups_at_largest_cutoff,
             "cutoffs_per_source": [
                 {"cutoff": cutoff, "pairs": pair_counts[cutoff], "covered_true_links": link_counts[cutoff],
                  "true_link_recall": link_counts[cutoff] / links if links else 1.0}
