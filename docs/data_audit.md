@@ -73,7 +73,9 @@ The private Kaggle `amazon-ml-person-a-holdout-50k` run completed on the disjoin
 
 ### Larger-neighbor development comparison
 
-The private Kaggle `amazon-ml-person-a-dev-k64-a32` run used the **same** seeded 10,000 Source 1 IDs and complete 10,320,219 training targets as the baseline, with 64 name neighbors and 32 address neighbors per target source. At final cap 64 it retrieved 31,047/34,770 true links (89.2925%), emitted 640,000 pairs, and reached 0.957808 oracle macro F0.5. Peak reported process RSS was 20.113 GiB. The baseline at the same cap retrieved 30,694/34,770 links (88.2773%) and reached 0.953626 oracle macro F0.5. This gain is measurable but still leaves 3,723 true links unseen on development. A separate cross-field token experiment is running; no final setting has been selected from these numbers.
+The private Kaggle `amazon-ml-person-a-dev-k64-a32` run used the **same** seeded 10,000 Source 1 IDs and complete 10,320,219 training targets as the baseline, with 64 name neighbors and 32 address neighbors per target source. At final cap 64 it retrieved 31,047/34,770 true links (89.2925%), emitted 640,000 pairs, and reached 0.957808 oracle macro F0.5. Peak reported process RSS was 20.113 GiB. The baseline at the same cap retrieved 30,694/34,770 links (88.2773%) and reached 0.953626 oracle macro F0.5. This gain is measurable but still leaves 3,723 true links unseen on development.
+
+The subsequent cross-field token experiment `amazon-ml-person-a-dev-cross-token` kept K32/A16 and cap 64 on those same IDs/targets. It retrieved 30,965/34,770 true links (89.0567%), emitted 636,563 pairs, and reached 0.956852 oracle macro F0.5, with 19.934 GiB peak process RSS. A fresh missed-link audit found 3,805 true links absent from its final candidate table. This is an improvement over baseline but below the larger-neighbor experiment; a combined run and a same-field word-pair run are still pending.
 
 ### Full-test baseline artifact
 
