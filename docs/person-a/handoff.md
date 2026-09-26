@@ -1,4 +1,4 @@
-# Person A handoff — 26 September 2026, 16:28 IST
+# Person A handoff — 26 September 2026, 16:48 IST
 
 Owner: Mridul. Branch: `feat/data-candidates`. Person B owns matching and
 evaluation; Atishay owns integration, the final zip, and portal uploads.
@@ -37,8 +37,8 @@ holdout, the same configuration kept **162,720/172,581 links (94.2862%)** in
 candidate-generation metrics, **not** B's matcher or leaderboard score.
 
 The full-training and full-test tables for this fallback are **not complete**.
-Full-training shard 0 of 4 is running privately on Kaggle as
-`mridulnegi2005/amazon-ml-person-a-train-broad-balanced-0-of-4`. An older
+Full-training shards 0 and 1 of 4 are running privately on Kaggle as
+`mridulnegi2005/amazon-ml-person-a-train-broad-balanced-{0,1}-of-4`. An older
 word-pair configuration completed all labeled training at 90.6929% recall,
 but those shards do not measure the newer fallback. A validated older
 full-test long-form table exists outside Git at
@@ -46,16 +46,30 @@ full-test long-form table exists outside Git at
 artifact, not the broad-token/balanced output. One test Source 1 ID has zero
 candidates in that older table, so its wide-format row must be empty.
 
-## Experiments still running
+## Newer proposal experiments and active runs
 
-The private Kaggle jobs `amazon-ml-person-a-dev-broad-namekeys128`,
-`amazon-ml-person-a-dev-broad-wordprobes128`,
-`amazon-ml-person-a-dev-grams32-stage128`, and
-`amazon-ml-person-a-dev-sibling2` are comparing proposal changes on the same
-seeded development IDs and all 10,320,219 train targets. Their results may
-replace the fallback only after measured recall, runtime, and memory checks.
-The `docs/data_audit.md` experiment ledger and `docs/person-a/todo.md` run log
-are the authoritative result records.
+The isolated name-key job added 211 true links to the staged 128-row candidate
+set but lost 78 final links against the controlled broad-token stage128. Wider
+word probes kept 33,026/34,770 true development links at cap64; 32/64
+character grams kept 32,975. Same-source second-hop search with two seeds and
+a 2,048-row stage kept **33,139/34,770 (95.3092%)** at final cap64, in
+639,876 pairs, with 0.982735 oracle macro F0.5. Reconstructing a practical
+128-row stage kept **33,125/34,770 (95.2689%)** and 0.982615 oracle; this is
+the strongest current development setting. Its complete event took 1,507.67
+seconds and peak container memory was 21.846 GiB. These are candidate oracle
+metrics, not B's matcher score.
+
+The private `amazon-ml-person-a-holdout-sibling128` kernel and full-test
+`amazon-ml-person-a-test-sibling128-{0,1}-of-4` kernels are running with the
+actual 128-row sibling setting. Their results and final cap decision are
+pending. Full-training fallback shards 0/1 remain running under the older
+broad-token/balanced setting; do not mix their outputs with sibling outputs.
+At cap96, the sibling development stage kept 33,284/34,770 true links in
+958,624 pairs with 0.984159 oracle macro F0.5; cap128 kept 33,360 links in
+1,268,043 pairs with 0.984841 oracle; cap256 kept 33,462 links in 2,288,941
+pairs with 0.985960 oracle. Cap96 is provisionally the smallest tested set
+within 0.002 oracle F0.5 of the best tested cap256 result. The `docs/data_audit.md` experiment
+ledger and `docs/person-a/todo.md` run log are the authoritative result records.
 
 ## Reproduction and remaining gate
 
