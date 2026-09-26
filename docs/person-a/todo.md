@@ -74,6 +74,7 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 
 | 26 Sep 2026 15:21 IST | Codex | Completed isolated name-key development run | Kaggle `amazon-ml-person-a-dev-name-keys` COMPLETE; same 10k IDs/full targets/K32-A16/16-32 grams/final cap64: 31,513/34,770 links (90.6327%), 638,880 pairs, 0.962342 oracle macro F0.5. Relative to the same setup without keys: 448 true links gained, 963 lost; net -515. Downloaded report and pair TSV under `D:\temp\amazon-ml-kernel-dev-name-keys-output`. | Done; do not promote keys alone |
 | 26 Sep 2026 15:21 IST | Codex | Started controlled stable-hash gram experiment | Private Kaggle `amazon-ml-person-a-dev-stable-grams` version 1 pushed, using broad-token settings with only `--gram-selection hash` changed. | Running; result pending |
+| 26 Sep 2026 15:30 IST | Codex | Compared final-selection rules on saved broad-token stage | `evaluate_stage_selection.py` reproduced current 32,594/34,770 links exactly, then found equal-weight name/address cosine with quota32 kept 32,840/34,770 (94.4492%) at the same 639,042 pairs and raised oracle macro F0.5 from 0.977017 to 0.980054. Report: `D:\temp\amazon-ml-broad-stage-selection.json`. | Development diagnostic only; holdout/full output not rerun |
 
 ## Unverified teammate comparison
 

@@ -120,6 +120,18 @@ stage rows, so near-ties can differ from the original full-precision order.
 The report is a curve **after** the proposal channels and `_rank`; even a
 2,048-row cutoff does not prove that all raw proposals were saved.
 
+To compare final cap-64 ranking rules and reserved per-source slots against
+the *same saved stage*, run:
+
+```powershell
+python code/business_entity_resolution/src/evaluate_stage_selection.py --work-dir D:\temp\downloaded-stage\person-a-dev.work --data-root '..\student_resource\dataset' --sample-split dev --cap 64 --quotas 0 16 24 32 --out D:\temp\downloaded-stage-selection.json
+```
+
+The `current` rule with quota 32 should reproduce that run's final cap-64
+report exactly. Other rows change only final selection; they do not recover
+links discarded before staging. Compare on a separate holdout before using
+a selected rule for full train/test output.
+
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
 The current `assemble_staged.py` intentionally rejects that older work
