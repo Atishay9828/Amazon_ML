@@ -73,10 +73,19 @@ records sharing two informative words within one field, including cases where
 the other field is absent or entirely different. `RETRIEVAL_VERSION` separates
 these checkpoints from the older baseline and cross-token-only version. The
 private `amazon-ml-person-a-dev-cross-token` and
-`amazon-ml-person-a-dev-word-pair` jobs use the same seeded 10k development
-Source 1 IDs, full train targets, and cap 64; their outputs must be measured
-before selecting either for full train/test generation. Do not combine staged
+`amazon-ml-person-a-dev-word-pair` jobs used the same seeded 10k development
+Source 1 IDs, full train targets, and cap 64; their measured results are in
+`docs/data_audit.md`. Do not combine staged
 parts across retrieval versions.
+
+The later `single_name` and `single_address` proposals are disabled by default.
+The private `amazon-ml-person-a-dev-broad-token` development run enables them
+with `--single-max-df 512 --single-tokens 2`, raises the same-field pair word
+frequency ceiling to `--pair-max-df 5000`, limits any one word-pair intersection
+to `--pair-max-hits 2000`, and also uses 16 indexed / 32 query character grams.
+It remains an experiment until its 10k full-target recall and resource use are
+measured. The full-training word-pair shards were started with the earlier
+defaults and are a separate all-label measurement, not the broad-token result.
 
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.

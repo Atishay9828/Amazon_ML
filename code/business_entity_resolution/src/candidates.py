@@ -32,8 +32,8 @@ except ImportError:
     from normalization import informative_address_tokens, informative_name_tokens, normalize_address, normalize_name
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "name_char", "address_char")
-RETRIEVAL_VERSION = "word-pair-1"
+CHANNEL_ORDER = ("exact_name", "exact_address", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char")
+RETRIEVAL_VERSION = "broad-token-1"
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,10 @@ class Settings:
     cross_max_df: int = 1_000
     cross_name_tokens: int = 3
     cross_address_tokens: int = 4
+    pair_max_df: int = 1_000
+    pair_max_hits: int = 0
+    single_max_df: int = 0
+    single_tokens: int = 0
     workers: int = 1
 
 
@@ -95,7 +99,8 @@ class TokenIndex:
                     for position in eligible[order]]
         return np.unique(np.concatenate(postings))
 
-    def pair_probe(self, query_row: sparse.csr_matrix, limit: int, max_df: int) -> np.ndarray:
+    def pair_probe(self, query_row: sparse.csr_matrix, limit: int, max_df: int,
+                   max_hits: int = 0) -> np.ndarray:
         """Find targets sharing two informative query words in this field."""
         features = query_row.indices
         if len(features) < 2 or limit < 2:
@@ -110,7 +115,7 @@ class TokenIndex:
                     for position in positions]
         intersections = [np.intersect1d(postings[i], postings[j], assume_unique=True)
                          for i in range(len(postings)) for j in range(i + 1, len(postings))]
-        hits = [rows for rows in intersections if len(rows)]
+        hits = [rows for rows in intersections if len(rows) and (not max_hits or len(rows) <= max_hits)]
         return np.unique(np.concatenate(hits)) if hits else np.empty(0, dtype=np.int32)
 
 
@@ -361,14 +366,23 @@ def _run_chunk(chunk_number: int) -> int:
             cross_address = state.address_tokens.probe(address_token_query[row_number],
                                                        settings.cross_address_tokens, settings.cross_max_df)
             for idx in state.name_tokens.pair_probe(name_token_query[row_number],
-                                                    settings.cross_name_tokens, settings.cross_max_df):
+                                                    settings.cross_name_tokens, settings.pair_max_df,
+                                                    settings.pair_max_hits):
                 found[int(idx)].add("name_pair")
             for idx in state.address_tokens.pair_probe(address_token_query[row_number],
-                                                       settings.cross_address_tokens, settings.cross_max_df):
+                                                       settings.cross_address_tokens, settings.pair_max_df,
+                                                       settings.pair_max_hits):
                 found[int(idx)].add("address_pair")
             if len(cross_name) and len(cross_address):
                 for idx in np.intersect1d(cross_name, cross_address, assume_unique=True):
                     found[int(idx)].add("cross_token")
+            if settings.single_tokens and settings.single_max_df:
+                for idx in state.name_tokens.probe(name_token_query[row_number],
+                                                   settings.single_tokens, settings.single_max_df):
+                    found[int(idx)].add("single_name")
+                for idx in state.address_tokens.probe(address_token_query[row_number],
+                                                      settings.single_tokens, settings.single_max_df):
+                    found[int(idx)].add("single_address")
             for idx in _best_field_hits(state.name_index, name_query[row_number], settings, settings.name_k):
                 found[int(idx)].add("name_char")
             for idx in _best_field_hits(state.address_index, address_query[row_number], settings, settings.address_k):
@@ -550,6 +564,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
             settings.query_chunk < 1 or settings.workers < 1 or
             settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
+    if settings.pair_max_df < 1 or settings.pair_max_hits < 0 or settings.single_max_df < 0 or settings.single_tokens < 0:
+        raise ValueError("token frequency must be positive; optional token budgets must be nonnegative")
     if shard_count < 1 or not 0 <= shard_index < shard_count:
         raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
     if sample_split and shard_count != 1:
@@ -608,6 +624,14 @@ def main() -> None:
                         help="Maximum rare character grams probed per query field")
     parser.add_argument("--max-probe-df", type=int, default=2_000,
                         help="Maximum target frequency of each probed character gram")
+    parser.add_argument("--pair-max-df", type=int, default=1_000,
+                        help="Maximum target frequency of a word used in same-field pair retrieval")
+    parser.add_argument("--pair-max-hits", type=int, default=0,
+                        help="Skip word-pair blocks larger than this; zero disables this limit")
+    parser.add_argument("--single-max-df", type=int, default=0,
+                        help="Maximum target frequency for single-word proposals; zero disables them")
+    parser.add_argument("--single-tokens", type=int, default=0,
+                        help="Rare query words to probe per field for single-word proposals")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -625,6 +649,8 @@ def main() -> None:
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,
                         query_grams=args.query_grams, max_probe_df=args.max_probe_df,
+                        pair_max_df=args.pair_max_df, pair_max_hits=args.pair_max_hits,
+                        single_max_df=args.single_max_df, single_tokens=args.single_tokens,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,

@@ -77,6 +77,27 @@ class PersonATest(unittest.TestCase):
             self.assertIn("name_pair", channels[("S1-1", "S2-1")])
             self.assertIn("address_pair", channels[("S1-2", "S2-2")])
 
+    def test_single_word_channel_recovers_one_shared_distinctive_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            columns = ("entity_id", "business_name", "business_address", "country")
+            write_tsv(root / "test" / "test_source1.tsv", columns,
+                      [("S1-1", "Orthopedic Group", "10405 Quince, Tucson", "US")])
+            write_tsv(root / "test" / "test_source2.tsv", columns,
+                      [("S2-1", "Orthopedic Clinic", "", "US")])
+            write_tsv(root / "test" / "test_source3.tsv", columns,
+                      [("S3-1", "Another Business", "17 Other Avenue", "US")])
+            output = root / "pairs.tsv"
+            settings = Settings(name_k=0, address_k=0, rare_max_df=0,
+                                rare_address_max_df=0, single_max_df=10,
+                                single_tokens=1, hash_features=1 << 12,
+                                matrix_chunk=2, query_chunk=2)
+            generate(root, "test", output, root / "work", settings)
+            with output.open("r", encoding="utf-8", newline="") as handle:
+                rows = list(csv.reader(handle, delimiter="\t"))[1:]
+            self.assertEqual([(row[0], row[1]) for row in rows], [("S1-1", "S2-1")])
+            self.assertEqual(rows[0][4], "single_name")
+
     def test_cap_64_contains_candidates_needed_at_smaller_caps(self):
         rng = random.Random(24680)
         for case in range(100):
