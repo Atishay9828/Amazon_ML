@@ -28,6 +28,10 @@ Windows falls back to one worker. The work directory contains resumable
 compressed per-source chunks. Keep it when changing only `--cap`, because the
 same retrieved rows can be reassembled at caps 16, 32, or 64. Use a fresh work
 directory if any retrieval setting or input changes; the manifest guards this.
+The CLI also exposes `--indexed-grams`, `--query-grams`, and `--max-probe-df`
+for bounded character-gram retrieval experiments; defaults are 8, 16, and
+2,000. The private `amazon-ml-person-a-dev-word-pair-grams16` run tests 16
+indexed and 32 query grams while keeping the other settings and sample fixed.
 
 For a full run that may exceed one Kaggle session, use `--shard-count 4` and
 `--shard-index 0`, `1`, `2`, or `3` in four separate kernels. Shards are

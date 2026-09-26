@@ -50,14 +50,15 @@ Status date: 26 September 2026 IST. `[x]` means the evidence below was checked; 
 | 26 Sep 2026 12:58 IST | Codex | Started combined token plus larger-neighbor development experiment | Private Kaggle kernel `amazon-ml-person-a-dev-cross-token-k64-a32` pushed, same 10k seeded IDs/full target pools/cap 64 | Running; no metric yet |
 | 26 Sep 2026 13:03 IST | Codex | Added name and address word-pair retrieval to address single-field misses | `python -m unittest discover -s code/business_entity_resolution/tests -v` — 11 passed; private code dataset updated with `word-pair-1`; kernel `amazon-ml-person-a-dev-word-pair` pushed on the same 10k seeded IDs/full target pools/cap 64 | Experimental; no recall/resource result yet |
 | 26 Sep 2026 13:19 IST | Codex | Completed cross-field token development experiment | `amazon-ml-person-a-dev-cross-token` COMPLETE; same 10k IDs/full targets/cap 64: 30,965/34,770 links (0.890567 recall), 0.956852 oracle macro F0.5, 636,563 pairs, 19.934 GiB peak process RSS. Local miss audit found 3,805 unseen links. | Done; below K64/A32 experiment |
+| 26 Sep 2026 13:25 IST | Codex | Started a wider character-gram development experiment | Added bounded `--indexed-grams`, `--query-grams`, `--max-probe-df` CLI settings; 11 focused tests passed; private Kaggle `amazon-ml-person-a-dev-word-pair-grams16` uses 16 indexed/32 query grams with word pairs, K32/A16, and cap 64 on the same 10k IDs/full target pools | Running; no metric yet |
 
 ## Unverified teammate comparison
 
 On 26 Sep, Mridul relayed a teammate's **unverified report** of 6,975/6,986 true links retrieved (99.84%) for 2,000 training Source 1 businesses, allegedly against all Source 2/3 records. The teammate has not pushed code or the final candidate table. Their Source 1 selection, candidate cap/volume, and whether ground truth influenced retrieval are unknown, so this is not a like-for-like comparison with A's seeded 10k cap-64 development run (30,694/34,770 links, 88.28%). Reproduce on identical IDs and budget before adopting it; do not call either figure matching accuracy.
 
-## Current next steps (26 Sep 2026, 13:22 IST)
+## Current next steps (26 Sep 2026, 13:26 IST)
 
-1. Wait for the combined cross-token/K64/A32 and word-pair development kernels. Compare **development** recall/oracle ceiling, candidate volume, runtime, and memory with the baseline, K64/A32, and completed cross-token results. The 50k baseline holdout has already been read once; do not retune from it. The teammate's 99.84% report is unverified and must use the same sample/cap for a fair comparison.
+1. Wait for the combined cross-token/K64/A32, word-pair, and wider-character-gram development kernels. Compare **development** recall/oracle ceiling, candidate volume, runtime, and memory with the baseline, K64/A32, and completed cross-token results. The 50k baseline holdout has already been read once; do not retune from it. The teammate's 99.84% report is unverified and must use the same sample/cap for a fair comparison.
 2. Generate full-train candidates for Person B and, if the retrieval configuration changes, regenerate full-test candidates. The validated baseline full-test file `D:\temp\amazon-ml-test-cap64.tsv` is available as a fallback outside Git; C must include one empty-candidate Source 1 row when converting to the required wide format.
 3. Hand off actual pair tables, measurements, and reproducible commands to B/C. Continue direct pushes to `feat/data-candidates`; PR #2 stays closed.
 

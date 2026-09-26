@@ -546,8 +546,10 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
              limit_source1: int | None = None, limit_targets: int | None = None,
              sample_split: str | None = None, shard_index: int = 0,
              shard_count: int = 1) -> set[str] | None:
-    if settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or settings.query_chunk < 1 or settings.workers < 1:
-        raise ValueError("cap/query_chunk/workers must be positive; top-K values must be nonnegative")
+    if (settings.cap < 1 or settings.name_k < 0 or settings.address_k < 0 or
+            settings.query_chunk < 1 or settings.workers < 1 or
+            settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
+        raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
     if shard_count < 1 or not 0 <= shard_index < shard_count:
         raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
     if sample_split and shard_count != 1:
@@ -600,6 +602,12 @@ def main() -> None:
     parser.add_argument("--query-chunk", type=int, default=2048)
     parser.add_argument("--matrix-chunk", type=int, default=100_000)
     parser.add_argument("--hash-features", type=int, default=1 << 20)
+    parser.add_argument("--indexed-grams", type=int, default=8,
+                        help="Maximum rare character grams posted per target field")
+    parser.add_argument("--query-grams", type=int, default=16,
+                        help="Maximum rare character grams probed per query field")
+    parser.add_argument("--max-probe-df", type=int, default=2_000,
+                        help="Maximum target frequency of each probed character gram")
     parser.add_argument("--workers", type=int, default=1, help="POSIX fork workers sharing the target index")
     parser.add_argument("--limit-source1", type=int, help="Benchmark only; not valid for final output")
     parser.add_argument("--limit-targets", type=int, help="Benchmark only; not valid for final output")
@@ -615,7 +623,9 @@ def main() -> None:
         parser.error("--report requires complete target sources and no --limit-* flags")
     settings = Settings(name_k=args.name_k, address_k=args.address_k, cap=args.cap,
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
-                        hash_features=args.hash_features, workers=args.workers)
+                        hash_features=args.hash_features, indexed_grams=args.indexed_grams,
+                        query_grams=args.query_grams, max_probe_df=args.max_probe_df,
+                        workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,
                             args.limit_source1, args.limit_targets, args.sample_split,
