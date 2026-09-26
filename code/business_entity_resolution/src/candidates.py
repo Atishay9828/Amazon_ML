@@ -565,7 +565,9 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
             settings.stage_cap < 1 or settings.query_chunk < 1 or settings.workers < 1 or
             settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
-    if settings.pair_max_df < 1 or settings.pair_max_hits < 0 or settings.single_max_df < 0 or settings.single_tokens < 0:
+    if (settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
+            settings.single_max_df < 0 or settings.single_tokens < 0 or
+            settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
         raise ValueError("token frequency must be positive; optional token budgets must be nonnegative")
     if shard_count < 1 or not 0 <= shard_index < shard_count:
         raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
@@ -629,6 +631,10 @@ def main() -> None:
                         help="Maximum target frequency of each probed character gram")
     parser.add_argument("--pair-max-df", type=int, default=1_000,
                         help="Maximum target frequency of a word used in same-field pair retrieval")
+    parser.add_argument("--cross-name-tokens", type=int, default=3,
+                        help="Informative query name words available to pair and cross-field probes")
+    parser.add_argument("--cross-address-tokens", type=int, default=4,
+                        help="Informative query address words available to pair and cross-field probes")
     parser.add_argument("--pair-max-hits", type=int, default=0,
                         help="Skip word-pair blocks larger than this; zero disables this limit")
     parser.add_argument("--single-max-df", type=int, default=0,
@@ -654,6 +660,8 @@ def main() -> None:
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,
                         query_grams=args.query_grams, max_probe_df=args.max_probe_df,
                         pair_max_df=args.pair_max_df, pair_max_hits=args.pair_max_hits,
+                        cross_name_tokens=args.cross_name_tokens,
+                        cross_address_tokens=args.cross_address_tokens,
                         single_max_df=args.single_max_df, single_tokens=args.single_tokens,
                         workers=args.workers)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
