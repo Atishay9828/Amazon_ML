@@ -5,7 +5,6 @@
     "candidates.gram_selection": "C4 (combined without hash). Current value: hash (R2 net +61 links, about +14% retrieval time).",
     "candidates.name_keys": "C2 (combined + name keys under the learned ranker). Current value: false (E3 and team stage128 showed displacement under _rank).",
     "candidates.hop_seeds / hop_k": "C3 (4 seeds, K32). Current value: 2 / 16 (R3 net +137 links).",
-    "reverse_top1.df_cap_fraction": "C1 reports reverse recall at 0.002. RV measured 88.55% top-1 at 0.01. Current value: 0.002 (faster).",
     "candidates.key_cap": "C5 (C1 + four exact keys + key features). Key probe: all four keys at block cap 200 add 469 dev links over R3 cap32 + reverse top-1, before ranking."
   },
   "pipeline_order": [
@@ -17,13 +16,23 @@
   "reverse_top1": {
     "ngram": "char 3-gram on normalize_name + ' | ' + normalize_address",
     "hash_features": 4194304,
-    "df_cap_fraction": 0.002,
+    "df_cap_fraction": 0.01,
     "top_k": 1,
     "batch_size": 256,
     "workers": 4,
     "matrix_chunk": 200000,
     "index_source1_of_same_split": true,
-    "_measured": "+308 unique dev links over R3; at most 10.0 M extra test pairs"
+    "_measured": "RV at DF cap 0.01: +308 unique dev links over R3 (88.55% top-1 alone). C1 at DF cap 0.002 staged only about +60, so 0.01 is required. C1 full train reverse pass at 0.002: 1,725 s."
+  },
+  "reverse_blank_name": {
+    "enabled": true,
+    "hash_features": 4194304,
+    "df_cap_fraction": 0.01,
+    "top_k": 20,
+    "batch_size": 256,
+    "workers": 4,
+    "matrix_chunk": 200000,
+    "_measured": "RF: +126 dev links over R3 cap32 + reverse top-1 at top-20; +96 at top-10; about 6.7 M test pairs at top-20"
   },
   "candidates": {
     "name_k": 32,

@@ -36,7 +36,7 @@ except ImportError:
                                name_token_signature, normalize_address, normalize_name)
 
 HEADER = ("source1_entity_id", "candidate_entity_id", "name_cosine", "address_cosine", "retrieval_channels")
-CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop", "reverse_top1") + KEY_NAMES
+CHANNEL_ORDER = ("exact_name", "exact_address", "name_signature", "compact_name", "rare_name", "rare_address", "name_pair", "address_pair", "cross_token", "single_name", "single_address", "name_char", "address_char", "sibling_name_char", "sibling_address_char", "second_hop", "reverse_top1", "reverse_blank_name") + KEY_NAMES
 RETRIEVAL_VERSION = "name-key-1"
 
 
@@ -73,6 +73,7 @@ class Settings:
     hop_seeds: int = 0
     hop_k: int = 16
     extra_pairs: Path | None = None
+    blank_pairs: Path | None = None
     key_cap: int = 0
     workers: int = 1
     config_hash: str | None = None
@@ -388,6 +389,7 @@ class _RetrievalState:
     name_tokens: TokenIndex
     address_tokens: TokenIndex
     extra: dict[str, tuple[int, ...]]
+    blank_extra: dict[str, tuple[int, ...]]
     match_blocks: dict[str, dict[str, list[int]]]
     settings: Settings
     work_dir: Path
@@ -399,7 +401,7 @@ _FORK_STATE: _RetrievalState | None = None
 
 def _always_staged(channels: str) -> bool:
     """Reverse and exact-key proposals bypass the _rank cut; the learned ranker decides them."""
-    return "reverse_top1" in channels or "key_" in channels
+    return "reverse_" in channels or "key_" in channels
 
 
 def _match_blocks(targets: list[Record], cap: int) -> dict[str, dict[str, list[int]]]:
@@ -494,6 +496,8 @@ def _run_chunk(chunk_number: int) -> int:
                 found[int(idx)].add("address_char")
             for idx in state.extra.get(record.entity_id, ()):
                 found[idx].add("reverse_top1")
+            for idx in state.blank_extra.get(record.entity_id, ()):
+                found[idx].add("reverse_blank_name")
             if state.match_blocks:
                 for label, key in zip(KEY_NAMES, match_keys(record.business_name, record.business_address)):
                     for idx in state.match_blocks[label].get(key, ()) if key else ():
@@ -601,12 +605,13 @@ def _retrieve_source(
                       "seconds": round(time.monotonic() - started, 2), **_memory_state()}), flush=True)
     match_blocks = _match_blocks(targets, settings.key_cap)
     del targets, names, addresses
-    extra = _load_extra(settings.extra_pairs, target_ids,
-                        {record.entity_id for record in source1}, source)
+    selected = {record.entity_id for record in source1}
+    extra = _load_extra(settings.extra_pairs, target_ids, selected, source)
+    blank_extra = _load_extra(settings.blank_pairs, target_ids, selected, source)
     _FORK_STATE = _RetrievalState(source1, target_ids, exact_names, exact_addresses,
                                  name_signatures, compact_names, rare,
                                  frequencies, rare_address, address_frequencies,
-                                 name_index, address_index, name_tokens, address_tokens, extra, match_blocks,
+                                 name_index, address_index, name_tokens, address_tokens, extra, blank_extra, match_blocks,
                                  settings, work_dir, source)
     if settings.workers > 1 and os.name == "posix":
         with multiprocessing.get_context("fork").Pool(processes=settings.workers) as pool:
@@ -649,11 +654,13 @@ def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: in
               shard_index: int, shard_count: int) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
     retrieval_settings = {key: value for key, value in vars(settings).items()
-                          if key not in {"cap", "final_score", "workers", "extra_pairs", "config_hash"}}
+                          if key not in {"cap", "final_score", "workers", "extra_pairs", "blank_pairs", "config_hash"}}
     if settings.gram_selection == "hash":
         retrieval_settings["hash_query_order"] = "stable-v1"
     retrieval_settings["extra_pairs_sha256"] = (sha256_file(settings.extra_pairs)
                                                   if settings.extra_pairs else None)
+    if settings.blank_pairs:
+        retrieval_settings["blank_pairs_sha256"] = sha256_file(settings.blank_pairs)
     return {"retrieval_version": RETRIEVAL_VERSION, "split": split,
             "config_hash": settings.config_hash, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
@@ -763,13 +770,15 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("shard_count must be positive and 0 <= shard_index < shard_count")
     if sample_split and shard_count != 1:
         raise ValueError("sample split and final-run sharding cannot be combined")
-    if settings.extra_pairs:
-        metadata_path = settings.extra_pairs.with_suffix(settings.extra_pairs.suffix + ".meta.json")
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    for pair_file in (settings.extra_pairs, settings.blank_pairs):
+        if not pair_file:
+            continue
+        metadata = json.loads(pair_file.with_suffix(pair_file.suffix + ".meta.json").read_text(encoding="utf-8"))
         if (metadata.get("split") != split or
                 metadata.get("source1_sha256") != sha256_file(source_path(data_root, split, 1)) or
                 metadata.get("limit_targets") != limit_targets):
-            raise ValueError("reverse pairs were built from a different split, Source 1 file, or target limit")
+            raise ValueError(f"{pair_file}: reverse pairs were built from a different split, "
+                             "Source 1 file, or target limit")
     work_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = work_dir / "manifest.json"
     expected = _manifest(data_root, split, settings, limit_source1, limit_targets,
@@ -861,6 +870,8 @@ def main() -> None:
                         help="Name neighbors per strong seed; address gets half this budget")
     parser.add_argument("--extra-pairs", type=Path,
                         help="Reverse top-1 TSV produced from Source 1 of this same split")
+    parser.add_argument("--blank-pairs", type=Path,
+                        help="Blank-address name-only reverse TSV produced from Source 1 of this same split")
     parser.add_argument("--key-cap", type=int, default=0,
                         help="Maximum block size for exact phonetic/OCR/compact/number keys; zero disables them")
     parser.add_argument("--config-hash", help="SHA-256 of the canonical pipeline configuration")
@@ -892,7 +903,8 @@ def main() -> None:
                         name_keys=args.name_keys, sibling_seeds=args.sibling_seeds,
                         sibling_name_k=args.sibling_name_k, sibling_address_k=args.sibling_address_k,
                         hop_seeds=args.hop_seeds, hop_k=args.hop_k,
-                        extra_pairs=args.extra_pairs, key_cap=args.key_cap,
+                        extra_pairs=args.extra_pairs, blank_pairs=args.blank_pairs,
+                        key_cap=args.key_cap,
                         workers=args.workers, config_hash=args.config_hash)
     work_dir = args.work_dir or args.out.parent / f"{args.out.stem}.work"
     selected_ids = generate(args.data_root, args.split, args.out, work_dir, settings,

@@ -57,14 +57,41 @@ def _reverse(data_root: Path, split: str, work_dir: Path,
     return path
 
 
+def _reverse_blank(data_root: Path, split: str, work_dir: Path,
+                   config: PipelineConfig) -> Path | None:
+    if not config.blank_enabled:
+        return None
+    path = work_dir / f"reverse-blank-{split}.tsv"
+    meta_path = path.with_suffix(path.suffix + ".meta.json")
+    settings = config.values["reverse_blank_name"]
+    expected = {"split": split, "channel": "reverse_blank_name",
+                "source1_sha256": sha256_file(source_path(data_root, split, 1)),
+                "limit_targets": None, "top_k": settings["top_k"],
+                "hash_features": settings["hash_features"],
+                "df_cap_fraction": settings["df_cap_fraction"], "batch_size": settings["batch_size"]}
+    if path.exists() and meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if all(meta.get(key) == value for key, value in expected.items()):
+            print(json.dumps({"stage": "reverse_blank_reused", "path": str(path)}), flush=True)
+            return path
+        raise ValueError(f"{path}: blank-address reverse metadata does not match this config and split")
+    reverse_top1.run_blank_name(data_root, split, path, top_k=settings["top_k"],
+                                workers=settings["workers"], batch_size=settings["batch_size"],
+                                hash_features=settings["hash_features"],
+                                df_cap_fraction=settings["df_cap_fraction"],
+                                matrix_chunk=settings["matrix_chunk"], config_hash=config.blank_sha256)
+    return path
+
+
 def _stage(data_root: Path, split: str, sample_split: str | None,
            work_dir: Path, config: PipelineConfig, reverse_path: Path | None,
-           shard_index: int = 0, shard_count: int = 1) -> tuple[Path, Path]:
+           shard_index: int = 0, shard_count: int = 1,
+           blank_path: Path | None = None) -> tuple[Path, Path]:
     suffix = sample_split or (f"{split}-{shard_index}-of-{shard_count}"
                               if shard_count > 1 else split)
     stage_dir = work_dir / f"stage-{suffix}"
     interim = work_dir / f"interim-{suffix}.tsv"
-    settings = config.settings(reverse_path)
+    settings = config.settings(reverse_path, blank_path)
     expected = candidates._manifest(data_root, split, settings, None, None,
                                     sample_split, shard_index, shard_count)
     manifest_path = stage_dir / "manifest.json"
@@ -96,7 +123,8 @@ def _model(data_root: Path, work_dir: Path, config: PipelineConfig,
     if supplied:
         raise FileNotFoundError(f"supplied ranker model does not exist: {path}")
     stage_dir, _ = _stage(data_root, "train", "ranktrain", work_dir,
-                          config, train_reverse)
+                          config, train_reverse,
+                          blank_path=_reverse_blank(data_root, "train", work_dir, config))
     rank_candidates.train(data_root, stage_dir, path,
                           max_negatives_per_source=ranker_config["max_negatives_per_source"],
                           model_params=ranker_config["model_params"])
@@ -143,7 +171,8 @@ def run(config_path: Path, data_root: Path, split: str, work_dir: Path, out: Pat
         reverse_path = _reverse(data_root, split, work_dir, config,
                                 reverse_train if split == "train" else reverse_test)
         stage_dir, interim = _stage(data_root, split, sample_split, work_dir,
-                                    config, reverse_path, shard_index, shard_count)
+                                    config, reverse_path, shard_index, shard_count,
+                                    _reverse_blank(data_root, split, work_dir, config))
         if interim != out:
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(interim, out)
@@ -160,7 +189,8 @@ def run(config_path: Path, data_root: Path, split: str, work_dir: Path, out: Pat
         if split == "train" and reverse_path is None and config.reverse_enabled:
             reverse_path = _reverse(data_root, "train", work_dir, config, reverse_train)
         stage_dir, _ = _stage(data_root, split, sample_split, work_dir,
-                              config, reverse_path, shard_index, shard_count)
+                              config, reverse_path, shard_index, shard_count,
+                              _reverse_blank(data_root, split, work_dir, config))
         cap = config.values["ranker"]["final_cap"]
         out.parent.mkdir(parents=True, exist_ok=True)
         inferred = _inference(data_root, split, sample_split, stage_dir,

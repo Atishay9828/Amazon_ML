@@ -102,7 +102,7 @@ class PipelineConfigTest(unittest.TestCase):
             b = load_config(write_config(root / "b.json", changed))
             self.assertNotEqual(a.sha256, b.sha256)
             self.assertEqual(a.reverse_sha256, b.reverse_sha256)
-            changed["reverse_top1"]["df_cap_fraction"] = 0.01
+            changed["reverse_top1"]["df_cap_fraction"] = 0.05
             c = load_config(write_config(root / "c.json", changed))
             self.assertNotEqual(a.reverse_sha256, c.reverse_sha256)
 
@@ -130,13 +130,22 @@ class RunPipelineTest(unittest.TestCase):
             meta = json.loads(reverse.with_suffix(".tsv.meta.json").read_text(encoding="utf-8"))
             self.assertEqual(meta["config_hash"], config.reverse_sha256)
 
+            blank = root / "work" / "reverse-blank-test.tsv"
+            blank_meta = json.loads(blank.with_suffix(".tsv.meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(blank_meta["channel"], "reverse_blank_name")
+            self.assertEqual(blank_meta["blank_address_targets"], 2)
+
             manual_out = root / "manual.tsv"
-            generate(data, "test", manual_out, root / "manual-work", config.settings(reverse))
+            generate(data, "test", manual_out, root / "manual-work", config.settings(reverse, blank))
             self.assertEqual(out.read_text(encoding="utf-8"), manual_out.read_text(encoding="utf-8"))
             with out.open("r", encoding="utf-8", newline="") as handle:
                 rows = list(csv.reader(handle, delimiter="\t"))
             self.assertEqual(tuple(rows[0]), HEADER)
-            self.assertIn(("S1-1", "S2-1"), {(row[0], row[1]) for row in rows[1:]})
+            channels = {(row[0], row[1]): row[4] for row in rows[1:]}
+            self.assertIn(("S1-1", "S2-1"), channels)
+            self.assertIn("reverse_blank_name", channels[("S1-1", "S3-2")])
+            with self.assertRaisesRegex(ValueError, "blank-address reverse pairs"):
+                config.settings(reverse)
 
             again = run_pipeline(config_path, data, "test", root / "work", out)
             self.assertEqual(again["stage_dir"], result["stage_dir"])

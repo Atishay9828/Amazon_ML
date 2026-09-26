@@ -3,6 +3,9 @@
   "reverse_top1": {
     "enabled": false
   },
+  "reverse_blank_name": {
+    "enabled": false
+  },
   "candidates": {
     "name_k": 32,
     "address_k": 16,

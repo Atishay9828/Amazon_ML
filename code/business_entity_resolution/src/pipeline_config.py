@@ -17,10 +17,12 @@ except ImportError:
     from rank_candidates import FEATURE_NAMES
 
 
-TOP_LEVEL = {"reverse_top1", "candidates", "ranker", "pipeline_order",
+TOP_LEVEL = {"reverse_top1", "reverse_blank_name", "candidates", "ranker", "pipeline_order",
              "expected_volume_test", "not_recommended"}
 REVERSE_KEYS = {"enabled", "ngram", "hash_features", "df_cap_fraction", "top_k",
                 "batch_size", "workers", "matrix_chunk", "index_source1_of_same_split"}
+BLANK_KEYS = {"enabled", "hash_features", "df_cap_fraction", "top_k", "batch_size",
+              "workers", "matrix_chunk"}
 RANKER_KEYS = {"enabled", "train_sample_split", "train_source1_ids", "train_selection_rule",
                "model", "model_params", "max_negatives_per_source", "features",
                "country_policy", "final_cap", "final_cap_alternative", "selection_rule"}
@@ -62,10 +64,18 @@ class PipelineConfig:
         return self.values["reverse_top1"].get("enabled", True)
 
     @property
+    def blank_enabled(self) -> bool:
+        return self.values.get("reverse_blank_name", {}).get("enabled", False)
+
+    @property
+    def blank_sha256(self) -> str:
+        return _digest(self.values.get("reverse_blank_name", {}))
+
+    @property
     def ranker_enabled(self) -> bool:
         return self.values["ranker"].get("enabled", True)
 
-    def settings(self, reverse_pairs: Path | None = None) -> Settings:
+    def settings(self, reverse_pairs: Path | None = None, blank_pairs: Path | None = None) -> Settings:
         values = dict(self.values["candidates"])
         declared = values.pop("extra_pairs")
         if self.reverse_enabled:
@@ -73,7 +83,10 @@ class PipelineConfig:
                 raise ValueError("enabled reverse channel requires its same-split pair file")
         elif declared is not None or reverse_pairs is not None:
             raise ValueError("disabled reverse channel cannot receive extra pairs")
-        return Settings(**values, extra_pairs=reverse_pairs, config_hash=self.sha256)
+        if self.blank_enabled != (blank_pairs is not None):
+            raise ValueError("blank-address reverse pairs must match the reverse_blank_name section")
+        return Settings(**values, extra_pairs=reverse_pairs, blank_pairs=blank_pairs,
+                        config_hash=self.sha256)
 
 
 def load_config(path: Path) -> PipelineConfig:
@@ -90,7 +103,12 @@ def load_config(path: Path) -> PipelineConfig:
     _check_keys("reverse_top1", reverse, REVERSE_KEYS,
                 {"enabled"} if reverse.get("enabled") is False else
                 REVERSE_KEYS - {"enabled"})
-    candidate_fields = {field.name for field in fields(Settings)} - {"config_hash"}
+    blank = values.get("reverse_blank_name", {"enabled": False})
+    if not isinstance(blank, dict):
+        raise ValueError("reverse_blank_name must be a JSON object")
+    _check_keys("reverse_blank_name", blank, BLANK_KEYS,
+                {"enabled"} if not blank.get("enabled", False) else BLANK_KEYS)
+    candidate_fields = {field.name for field in fields(Settings)} - {"config_hash", "blank_pairs"}
     _check_keys("candidates", candidate, candidate_fields, candidate_fields)
     _check_keys("ranker", ranker, RANKER_KEYS,
                 {"enabled", "final_cap"} if ranker.get("enabled") is False else
