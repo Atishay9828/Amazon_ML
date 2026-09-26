@@ -183,6 +183,14 @@ class PersonATest(unittest.TestCase):
                 self.assertLessEqual({row[1] for row in _choose_rows(left, right, cap)}, large,
                                      f"cap nesting failed in case {case}")
 
+    def test_balanced_final_score_can_undo_channel_bonus_displacement(self):
+        rows = [
+            ("S1-1", "S2-1", "0.700000", "0.700000", "exact_name"),
+            ("S1-1", "S2-2", "0.760000", "0.760000", "name_char"),
+        ]
+        self.assertEqual(_choose_rows(rows, [], 1)[0][1], "S2-1")
+        self.assertEqual(_choose_rows(rows, [], 1, "balanced")[0][1], "S2-2")
+
     def test_stage_cap_controls_proposal_shortlist_independently_of_final_cap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

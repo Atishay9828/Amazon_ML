@@ -132,6 +132,14 @@ report exactly. Other rows change only final selection; they do not recover
 links discarded before staging. Compare on a separate holdout before using
 a selected rule for full train/test output.
 
+The candidate CLI also supports `--final-score balanced` to select the final
+cap by the mean of name and address cosine with no channel bonuses. It leaves
+the earlier per-source stage order unchanged. `assemble_staged.py` accepts the
+same flag when reassembling a compatible saved stage; the flag is excluded
+from the retrieval manifest so final selection can be changed without
+recomputing retrieval. Keep the selected flag in the run instructions and use
+the resulting long-form table as the exact candidate set handed to B and C.
+
 The completed baseline `dev` job was run before `cross_token` existed. Its
 cap-64 reassembly is stored outside Git at `D:\temp\amazon-ml-dev-cap64.tsv`.
 The current `assemble_staged.py` intentionally rejects that older work

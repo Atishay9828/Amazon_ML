@@ -43,6 +43,7 @@ class Settings:
     name_k: int = 32
     address_k: int = 16
     cap: int = 32
+    final_score: str = "current"
     stage_cap: int = 64
     query_chunk: int = 2048
     matrix_chunk: int = 100_000
@@ -228,6 +229,14 @@ def _rank(name: float, address: float, channels: str) -> float:
             + 0.08 * ("exact_address" in selected) + 0.08 * ("name_signature" in selected)
             + 0.04 * ("compact_name" in selected) + 0.02 * ("rare_name" in selected)
             + 0.02 * ("rare_address" in selected))
+
+
+def _final_rank(name: float, address: float, channels: str, rule: str) -> float:
+    if rule == "current":
+        return _rank(name, address, channels)
+    if rule == "balanced":
+        return 0.5 * (name + address)
+    raise ValueError(f"unknown final score rule: {rule}")
 
 
 def _format_score(value: float) -> str:
@@ -509,16 +518,16 @@ def _retrieve_source(
     _FORK_STATE = None
 
 
-def _choose_rows(rows2: list, rows3: list, cap: int) -> list:
+def _choose_rows(rows2: list, rows3: list, cap: int, final_score: str = "current") -> list:
     def ordered(rows):
-        return sorted(rows, key=lambda row: (-_rank(float(row[2]), float(row[3]), row[4]), row[1]))
+        return sorted(rows, key=lambda row: (-_final_rank(float(row[2]), float(row[3]), row[4], final_score), row[1]))
     left, right = ordered(rows2), ordered(rows3)
     chosen = []
     quota = cap // 2
     chosen.extend(left[:quota])
     chosen.extend(right[:quota])
     remainder = left[quota:] + right[quota:]
-    remainder.sort(key=lambda row: (-_rank(float(row[2]), float(row[3]), row[4]), row[1]))
+    remainder.sort(key=lambda row: (-_final_rank(float(row[2]), float(row[3]), row[4], final_score), row[1]))
     chosen.extend(remainder[:cap - len(chosen)])
     return sorted(chosen, key=lambda row: row[1])
 
@@ -527,7 +536,8 @@ def _manifest(data_root: Path, split: str, settings: Settings, limit_source1: in
               limit_targets: int | None, sample_split: str | None,
               shard_index: int, shard_count: int) -> dict:
     paths = [source_path(data_root, split, source) for source in (1, 2, 3)]
-    retrieval_settings = {key: value for key, value in vars(settings).items() if key not in {"cap", "workers"}}
+    retrieval_settings = {key: value for key, value in vars(settings).items()
+                          if key not in {"cap", "final_score", "workers"}}
     return {"retrieval_version": RETRIEVAL_VERSION, "split": split, "settings": retrieval_settings,
             "limit_source1": limit_source1, "sample_split": sample_split,
             "shard_index": shard_index, "shard_count": shard_count,
@@ -620,6 +630,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
     if settings.gram_selection not in {"rarest", "hash"}:
         raise ValueError("gram_selection must be rarest or hash")
+    if settings.final_score not in {"current", "balanced"}:
+        raise ValueError("final_score must be current or balanced")
     if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
             settings.single_max_df < 0 or settings.single_tokens < 0 or
             settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
@@ -654,7 +666,8 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
             groups2 = _read_part(_part_path(work_dir, 2, chunk_number))
             groups3 = _read_part(_part_path(work_dir, 3, chunk_number))
             for record in source1[start:start + settings.query_chunk]:
-                rows = _choose_rows(groups2.get(record.entity_id, []), groups3.get(record.entity_id, []), settings.cap)
+                rows = _choose_rows(groups2.get(record.entity_id, []), groups3.get(record.entity_id, []),
+                                    settings.cap, settings.final_score)
                 for row in rows:
                     writer.writerow(row)
                     emitted += 1
@@ -673,6 +686,8 @@ def main() -> None:
     parser.add_argument("--name-k", type=int, default=32)
     parser.add_argument("--address-k", type=int, default=16)
     parser.add_argument("--cap", type=int, default=32)
+    parser.add_argument("--final-score", choices=("current", "balanced"), default="current",
+                        help="Final cap ranking; balanced uses equal name/address cosine without channel bonuses")
     parser.add_argument("--stage-cap", type=int, default=64,
                         help="Maximum ranked proposals staged per target source before the final cap")
     parser.add_argument("--query-chunk", type=int, default=2048)
@@ -718,6 +733,7 @@ def main() -> None:
     if args.report and (args.split != "train" or args.limit_source1 is not None or args.limit_targets is not None):
         parser.error("--report requires complete target sources and no --limit-* flags")
     settings = Settings(name_k=args.name_k, address_k=args.address_k, cap=args.cap,
+                        final_score=args.final_score,
                         stage_cap=args.stage_cap,
                         query_chunk=args.query_chunk, matrix_chunk=args.matrix_chunk,
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,

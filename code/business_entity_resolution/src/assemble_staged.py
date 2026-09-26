@@ -16,7 +16,7 @@ from data import source_path
 
 def assemble(data_root: Path, split: str, work_dir: Path, out: Path, cap: int,
              sample_split: str | None = None, shard_index: int = 0,
-             shard_count: int = 1) -> int:
+             shard_count: int = 1, final_score: str = "current") -> int:
     if not 1 <= cap <= 128:
         raise ValueError("staged retrieval supports caps 1 through 128; 128 is diagnostic only")
     manifest = json.loads((work_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -42,7 +42,7 @@ def assemble(data_root: Path, split: str, work_dir: Path, out: Path, cap: int,
             groups3 = _read_part(_part_path(work_dir, 3, chunk_number))
             for record in source1[start:start + chunk_size]:
                 chosen = _choose_rows(groups2.get(record.entity_id, []),
-                                      groups3.get(record.entity_id, []), cap)
+                                      groups3.get(record.entity_id, []), cap, final_score)
                 writer.writerows(chosen)
                 count += len(chosen)
     os.replace(temporary, out)
@@ -56,11 +56,12 @@ def main() -> None:
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--cap", type=int, required=True)
+    parser.add_argument("--final-score", choices=("current", "balanced"), default="current")
     parser.add_argument("--sample-split", choices=("dev", "holdout"))
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args()
-    print(f"assembled {assemble(args.data_root, args.split, args.work_dir, args.out, args.cap, args.sample_split, args.shard_index, args.shard_count):,} pairs")
+    print(f"assembled {assemble(args.data_root, args.split, args.work_dir, args.out, args.cap, args.sample_split, args.shard_index, args.shard_count, args.final_score):,} pairs")
 
 
 if __name__ == "__main__":

@@ -12,27 +12,28 @@ from collections import defaultdict
 from pathlib import Path
 
 try:
-    from .candidates import _load_sorted_source1, _rank, _read_part, _select_source1
+    from .candidates import _choose_rows, _final_rank, _load_sorted_source1, _read_part, _select_source1
     from .data import iter_truth, source_path
 except ImportError:
-    from candidates import _load_sorted_source1, _rank, _read_part, _select_source1
+    from candidates import _choose_rows, _final_rank, _load_sorted_source1, _read_part, _select_source1
     from data import iter_truth, source_path
 
 
 def _score(row: tuple[str, str, str, str, str], rule: str) -> float:
     name, address = float(row[2]), float(row[3])
-    if rule == "current":
-        return _rank(name, address, row[4])
+    if rule in {"current", "balanced"}:
+        return _final_rank(name, address, row[4], rule)
     if rule == "cosine":
         return 0.55 * name + 0.45 * address
-    if rule == "balanced":
-        return 0.5 * (name + address)
     if rule == "both_fields":
         return 0.45 * name + 0.35 * address + 0.2 * min(name, address)
     raise ValueError(f"unknown score rule: {rule}")
 
 
 def _choose(rows2: list, rows3: list, cap: int, quota: int, rule: str) -> list:
+    if rule in {"current", "balanced"} and quota == cap // 2:
+        return _choose_rows(rows2, rows3, cap, rule)
+
     def ordered(rows: list) -> list:
         return sorted(rows, key=lambda row: (-_score(row, rule), row[1]))
 

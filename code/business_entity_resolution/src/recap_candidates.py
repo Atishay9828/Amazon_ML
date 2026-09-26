@@ -10,7 +10,7 @@ from pathlib import Path
 from candidates import HEADER, _choose_rows
 
 
-def recap(source_path: Path, out: Path, cap: int) -> int:
+def recap(source_path: Path, out: Path, cap: int, final_score: str = "current") -> int:
     if cap < 1:
         raise ValueError("cap must be positive")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -29,7 +29,7 @@ def recap(source_path: Path, out: Path, cap: int) -> int:
         previous = ("", "")
 
         def flush() -> int:
-            chosen = _choose_rows(left, right, cap)
+            chosen = _choose_rows(left, right, cap, final_score)
             writer.writerows(chosen)
             return len(chosen)
 
@@ -61,8 +61,9 @@ def main() -> None:
     parser.add_argument("--in", dest="source", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--cap", required=True, type=int)
+    parser.add_argument("--final-score", choices=("current", "balanced"), default="current")
     args = parser.parse_args()
-    print(f"wrote {recap(args.source, args.out, args.cap):,} pairs to {args.out}")
+    print(f"wrote {recap(args.source, args.out, args.cap, args.final_score):,} pairs to {args.out}")
 
 
 if __name__ == "__main__":
