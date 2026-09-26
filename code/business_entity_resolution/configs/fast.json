@@ -1,10 +1,6 @@
 {
-  "_status": "PROVISIONAL 26 Sep 2026. Values marked in _pending are decided by review runs C1-C4. Do not freeze before they report.",
+  "_status": "FAST preset 26 Sep 2026: the C5 measured configuration (learned cap32 97.44% on the 10k dev sample). Same as final.json except reverse DF cap 0.002 and no blank-address pass. Train reverse about 0.5-1 h instead of about 8.5 h.",
   "_evidence": "person-a-candidate-review.md, sections 5 and 6. All recall values: seeded 10k dev IDs, full train targets.",
-  "_pending": {
-    "candidates.name_keys": "C2 (combined + name keys under the learned ranker). Current value: false (E3 and team stage128 showed displacement under _rank).",
-    "candidates.key_cap": "Value 200 confirmed by C5 (learned cap32 96.04% -> 97.44%, staged 96.33% -> 98.17%). V1 tests 2000."
-  },
   "pipeline_order": [
     "1. reverse_top1.py  (per split: train for ranktrain, test for submission)",
     "2. candidates.py    (ranktrain sample, then the target split; identical retrieval settings)",
@@ -14,23 +10,16 @@
   "reverse_top1": {
     "ngram": "char 3-gram on normalize_name + ' | ' + normalize_address",
     "hash_features": 4194304,
-    "df_cap_fraction": 0.01,
+    "df_cap_fraction": 0.002,
     "top_k": 1,
     "batch_size": 256,
     "workers": 4,
     "matrix_chunk": 200000,
     "index_source1_of_same_split": true,
-    "_measured": "RV at DF cap 0.01: +308 unique dev links over R3 (88.55% top-1 alone). C1 at DF cap 0.002 staged only about +60, so 0.01 is required. C1 full train reverse pass at 0.002: 1,725 s."
+    "_measured": "C1-C5 used 0.002. Reverse top-1 alone finds 50.9% of dev links at 0.002 (78.3% at 0.005, 88.6% at 0.01)."
   },
   "reverse_blank_name": {
-    "enabled": true,
-    "hash_features": 4194304,
-    "df_cap_fraction": 0.01,
-    "top_k": 20,
-    "batch_size": 256,
-    "workers": 4,
-    "matrix_chunk": 200000,
-    "_measured": "RF: +126 dev links over R3 cap32 + reverse top-1 at top-20; +96 at top-10; about 6.7 M test pairs at top-20"
+    "enabled": false
   },
   "candidates": {
     "name_k": 32,
