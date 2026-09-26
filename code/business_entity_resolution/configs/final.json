@@ -2,9 +2,7 @@
   "_status": "PROVISIONAL 26 Sep 2026. Values marked in _pending are decided by review runs C1-C4. Do not freeze before they report.",
   "_evidence": "person-a-candidate-review.md, sections 5 and 6. All recall values: seeded 10k dev IDs, full train targets.",
   "_pending": {
-    "candidates.gram_selection": "C4 (combined without hash). Current value: hash (R2 net +61 links, about +14% retrieval time).",
     "candidates.name_keys": "C2 (combined + name keys under the learned ranker). Current value: false (E3 and team stage128 showed displacement under _rank).",
-    "candidates.hop_seeds / hop_k": "C3 (4 seeds, K32). Current value: 2 / 16 (R3 net +137 links).",
     "candidates.key_cap": "C5 (C1 + four exact keys + key features). Key probe: all four keys at block cap 200 add 469 dev links over R3 cap32 + reverse top-1, before ranking."
   },
   "pipeline_order": [
@@ -73,7 +71,9 @@
       "hash_features": "Keep 2^20. E1 (2^23) was a tie.",
       "stage_cap": "256 is enough. R4: 256 to 2048 per source adds 8 links.",
       "cap": "Not used for the final set. The learned ranker applies the final cap.",
-      "key_cap": "Exact phonetic, OCR-phonetic, compact-with-digits, and numbers+first-code name keys; blocks above this size are skipped; key rows bypass the _rank staging cut."
+      "key_cap": "Exact phonetic, OCR-phonetic, compact-with-digits, and numbers+first-code name keys; blocks above this size are skipped; key rows bypass the _rank staging cut.",
+      "hop_seeds": "C3 (4 seeds, K32) vs C1 (2, K16): learned cap32 95.96% vs 96.04%; keep 2 / 16.",
+      "gram_selection": "C4 (no hash) vs C1 (hash): learned cap32 95.93% vs 96.04%, cap64 95.99% vs 96.16%; keep hash."
     }
   },
   "ranker": {
