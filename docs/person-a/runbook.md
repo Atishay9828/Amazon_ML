@@ -131,6 +131,10 @@ The `current` rule with quota 32 should reproduce that run's final cap-64
 report exactly. Other rows change only final selection; they do not recover
 links discarded before staging. Compare on a separate holdout before using
 a selected rule for full train/test output.
+For an exact stage-depth comparison, add `--stage-limit 128` (or another
+cutoff) to reconstruct the original first ranking cut from a deeper saved
+stage before testing final selection. The reconstruction uses rounded staged
+cosine scores, so near-tie order can differ from the live run.
 
 The candidate CLI also supports `--final-score balanced` to select the final
 cap by the mean of name and address cosine with no channel bonuses. It leaves

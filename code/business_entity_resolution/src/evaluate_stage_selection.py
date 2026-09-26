@@ -12,10 +12,10 @@ from collections import defaultdict
 from pathlib import Path
 
 try:
-    from .candidates import _choose_rows, _final_rank, _load_sorted_source1, _read_part, _select_source1
+    from .candidates import _choose_rows, _final_rank, _load_sorted_source1, _rank, _read_part, _select_source1
     from .data import iter_truth, source_path
 except ImportError:
-    from candidates import _choose_rows, _final_rank, _load_sorted_source1, _read_part, _select_source1
+    from candidates import _choose_rows, _final_rank, _load_sorted_source1, _rank, _read_part, _select_source1
     from data import iter_truth, source_path
 
 
@@ -46,9 +46,12 @@ def _choose(rows2: list, rows3: list, cap: int, quota: int, rule: str) -> list:
 
 def evaluate(work_dir: Path, data_root: Path, sample_split: str,
              cap: int = 64, quotas: tuple[int, ...] = (0, 16, 24, 32),
-             rules: tuple[str, ...] = ("current", "cosine", "balanced", "both_fields")) -> dict:
+             rules: tuple[str, ...] = ("current", "cosine", "balanced", "both_fields"),
+             stage_limit: int | None = None) -> dict:
     if cap < 1 or any(quota < 0 or quota > cap // 2 for quota in quotas):
         raise ValueError("cap must be positive and quotas must fit both sources")
+    if stage_limit is not None and stage_limit < 1:
+        raise ValueError("stage_limit must be positive")
     chosen = _select_source1(_load_sorted_source1(source_path(data_root, "train", 1), None), sample_split)
     selected = {record.entity_id for record in chosen}
     truth = {entity_id: set(matches) for entity_id, matches in
@@ -81,6 +84,13 @@ def evaluate(work_dir: Path, data_root: Path, sample_split: str,
             rows2, rows3 = groups2.get(entity_id, []), groups3.get(entity_id, [])
             if len({row[1] for row in rows2 + rows3}) != len(rows2) + len(rows3):
                 raise ValueError(f"duplicate staged target for {entity_id}")
+            if stage_limit is not None:
+                def trim(rows):
+                    if len(rows) <= stage_limit:
+                        return rows
+                    return sorted(rows, key=lambda row: (
+                        -_rank(float(row[2]), float(row[3]), row[4]), row[1]))[:stage_limit]
+                rows2, rows3 = trim(rows2), trim(rows3)
             for variant in variants:
                 rule, quota = variant
                 kept = _choose(rows2, rows3, cap, quota, rule)
@@ -113,6 +123,7 @@ def evaluate(work_dir: Path, data_root: Path, sample_split: str,
     results.sort(key=lambda row: (-row["oracle_macro_f0_5"], -row["true_link_recall"],
                                   row["candidate_pairs"], row["score_rule"], row["source_quota"]))
     return {"source1_rows": len(selected), "true_links": links, "cap": cap,
+            "stage_limit_per_source": stage_limit,
             "stage_chunks_per_source": len(parts[0]), "variants": results}
 
 
@@ -125,10 +136,12 @@ def main() -> None:
     parser.add_argument("--quotas", type=int, nargs="+", default=[0, 16, 24, 32])
     parser.add_argument("--rules", nargs="+", choices=("current", "cosine", "balanced", "both_fields"),
                         default=["current", "cosine", "balanced", "both_fields"])
+    parser.add_argument("--stage-limit", type=int,
+                        help="Recreate a shallower first ranking cut from a deeper saved stage")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     result = evaluate(args.work_dir, args.data_root, args.sample_split, args.cap,
-                      tuple(args.quotas), tuple(args.rules))
+                      tuple(args.quotas), tuple(args.rules), args.stage_limit)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
