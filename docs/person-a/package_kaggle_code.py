@@ -1,7 +1,7 @@
 """Stage an A-only source ZIP for a *private* Kaggle code dataset.
 
 Run from anywhere: python docs/person-a/package_kaggle_code.py --out D:/temp/amazon-ml-code-upload
-The staged folder contains only Python source/tests and Kaggle metadata.
+The staged folder contains only Python source/tests, pipeline configs, and Kaggle metadata.
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ def main() -> None:
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     destination = args.out / "person-a-code.zip"
-    files = sorted([*(PACKAGE / "src").glob("*.py"), *(PACKAGE / "tests").glob("*.py")])
+    files = sorted([*(PACKAGE / "src").glob("*.py"), *(PACKAGE / "tests").glob("*.py"),
+                    *(PACKAGE / "configs").glob("*.json")])
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in files:
             archive.write(path, path.relative_to(ROOT))
