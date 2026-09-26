@@ -593,7 +593,7 @@ def generate(data_root: Path, split: str, out: Path, work_dir: Path, settings: S
             settings.stage_cap < 1 or settings.query_chunk < 1 or settings.workers < 1 or
             settings.indexed_grams < 1 or settings.query_grams < 1 or settings.max_probe_df < 1):
         raise ValueError("cap/chunk/workers/gram budgets must be positive; top-K values must be nonnegative")
-    if (settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
+    if (settings.cross_max_df < 1 or settings.pair_max_df < 1 or settings.pair_max_hits < 0 or
             settings.single_max_df < 0 or settings.single_tokens < 0 or
             settings.cross_name_tokens < 0 or settings.cross_address_tokens < 0):
         raise ValueError("token frequency must be positive; optional token budgets must be nonnegative")
@@ -659,6 +659,8 @@ def main() -> None:
                         help="Maximum target frequency of each probed character gram")
     parser.add_argument("--pair-max-df", type=int, default=1_000,
                         help="Maximum target frequency of a word used in same-field pair retrieval")
+    parser.add_argument("--cross-max-df", type=int, default=1_000,
+                        help="Maximum word frequency used in cross-field intersection proposals")
     parser.add_argument("--cross-name-tokens", type=int, default=3,
                         help="Informative query name words available to pair and cross-field probes")
     parser.add_argument("--cross-address-tokens", type=int, default=4,
@@ -690,6 +692,7 @@ def main() -> None:
                         hash_features=args.hash_features, indexed_grams=args.indexed_grams,
                         query_grams=args.query_grams, max_probe_df=args.max_probe_df,
                         pair_max_df=args.pair_max_df, pair_max_hits=args.pair_max_hits,
+                        cross_max_df=args.cross_max_df,
                         cross_name_tokens=args.cross_name_tokens,
                         cross_address_tokens=args.cross_address_tokens,
                         single_max_df=args.single_max_df, single_tokens=args.single_tokens,
