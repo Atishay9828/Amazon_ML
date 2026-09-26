@@ -1,0 +1,109 @@
+{
+  "_status": "PROVISIONAL 26 Sep 2026. Values marked in _pending are decided by review runs C1-C4. Do not freeze before they report.",
+  "_evidence": "person-a-candidate-review.md, sections 5 and 6. All recall values: seeded 10k dev IDs, full train targets.",
+  "_pending": {
+    "candidates.gram_selection": "C4 (combined without hash). Current value: hash (R2 net +61 links, about +14% retrieval time).",
+    "candidates.name_keys": "C2 (combined + name keys under the learned ranker). Current value: false (E3 and team stage128 showed displacement under _rank).",
+    "candidates.hop_seeds / hop_k": "C3 (4 seeds, K32). Current value: 2 / 16 (R3 net +137 links).",
+    "reverse_top1.df_cap_fraction": "C1 reports reverse recall at 0.002. RV measured 88.55% top-1 at 0.01. Current value: 0.002 (faster)."
+  },
+
+  "pipeline_order": [
+    "1. reverse_top1.py  (per split: train for ranktrain, test for submission)",
+    "2. candidates.py    (ranktrain sample, then the target split; identical retrieval settings)",
+    "3. rank_candidates.py train  (on the ranktrain staged chunks)",
+    "4. rank_candidates.py infer  (on the target split staged chunks, final cap)"
+  ],
+
+  "reverse_top1": {
+    "ngram": "char 3-gram on normalize_name + ' | ' + normalize_address",
+    "hash_features": 4194304,
+    "df_cap_fraction": 0.002,
+    "top_k": 1,
+    "batch_size": 256,
+    "workers": 4,
+    "matrix_chunk": 200000,
+    "index_source1_of_same_split": true,
+    "_measured": "+308 unique dev links over R3; at most 10.0 M extra test pairs"
+  },
+
+  "candidates": {
+    "name_k": 32,
+    "address_k": 16,
+    "cap": 32,
+    "final_score": "current",
+    "hash_features": 1048576,
+    "indexed_grams": 16,
+    "query_grams": 32,
+    "gram_selection": "hash",
+    "min_index_df": 1,
+    "max_probe_df": 2000,
+    "max_common_df": 0.05,
+    "max_exact_block": 2000,
+    "rare_max_df": 64,
+    "rare_address_max_df": 128,
+    "cross_max_df": 1000,
+    "cross_name_tokens": 3,
+    "cross_address_tokens": 4,
+    "pair_max_df": 5000,
+    "pair_max_hits": 2000,
+    "single_max_df": 512,
+    "single_tokens": 2,
+    "name_keys": false,
+    "sibling_seeds": 0,
+    "sibling_name_k": 16,
+    "sibling_address_k": 8,
+    "hop_seeds": 2,
+    "hop_k": 16,
+    "extra_pairs": "<output of step 1 for the same split>",
+    "stage_cap": 256,
+    "query_chunk": 2048,
+    "matrix_chunk": 100000,
+    "workers": 4,
+    "_notes": {
+      "sibling_seeds": "Keep 0. It overlaps hop_seeds. Enable only one sibling mechanism.",
+      "hash_features": "Keep 2^20. E1 (2^23) was a tie.",
+      "stage_cap": "256 is enough. R4: 256 to 2048 per source adds 8 links.",
+      "cap": "Not used for the final set. The learned ranker applies the final cap."
+    }
+  },
+
+  "ranker": {
+    "train_sample_split": "ranktrain",
+    "train_source1_ids": 50000,
+    "train_selection_rule": "seed 7 sample of train Source 1 IDs outside the seeded dev 10k and holdout 50k",
+    "model": "sklearn.ensemble.HistGradientBoostingClassifier",
+    "model_params": {"max_iter": 300, "learning_rate": 0.1, "max_leaf_nodes": 63, "random_state": 0},
+    "max_negatives_per_source": 32,
+    "features": [
+      "name_cosine", "address_cosine", "prod", "mx", "mn", "is_s3",
+      "base_rank", "base_pos", "name_pos", "addr_pos", "source_count", "n_channels",
+      "name_jac", "addr_jac", "num_jac", "num_any", "num_conflict",
+      "sig_eq", "compact_eq", "t_addr_blank", "country_eq",
+      "ch_<every channel in CHANNEL_ORDER>"
+    ],
+    "country_policy": "feature only, never a filter (France appears only in test)",
+    "final_cap": 32,
+    "final_cap_alternative": 16,
+    "selection_rule": "cap // 2 per source by model probability, remainder filled by probability (same quota as _choose_rows)",
+    "_measured": {
+      "R3 learned cap 16": "95.62%",
+      "R3 learned cap 32": "95.84%",
+      "R3 learned cap 32 + reverse top-1": "96.74%",
+      "_rank cap 64 (current default)": "93.74%"
+    }
+  },
+
+  "expected_volume_test": {
+    "forward_pairs_cap32": "1,732,544 x 32 = 55.4 M",
+    "reverse_pairs_top1": "<= 10.0 M before overlap",
+    "current_cap64_file": "110.3 M"
+  },
+
+  "not_recommended": {
+    "hash_features_2^23": "E1 tie (-17 links)",
+    "exact_keys_with_rank_bonus": "E3 displaced 881 true links",
+    "exact_forward_concat_FX": "+114 links at top-8 but about 17 h per source on one core for test",
+    "final_cap_96_or_more_with_rank": "the learned ranker at cap 16-32 beats it with fewer pairs"
+  }
+}
