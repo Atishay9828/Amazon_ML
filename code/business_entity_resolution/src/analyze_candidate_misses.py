@@ -10,7 +10,7 @@ from pathlib import Path
 
 from candidates import HEADER, _load_sorted_source1, _select_source1
 from data import iter_records, iter_truth, source_path
-from normalization import normalize_address, normalize_name
+from normalization import compact_name, name_token_signature, normalize_address, normalize_name
 
 
 def overlap(left: str, right: str) -> bool:
@@ -55,6 +55,7 @@ def main() -> None:
     by_source = Counter()
     by_country = Counter()
     source_candidate_counts = Counter()
+    name_key_overlap = Counter()
     examples = []
     for entity_id, target_id in sorted(misses):
         left, right = source1[entity_id], targets[target_id]
@@ -67,6 +68,10 @@ def main() -> None:
         by_source[target_id[:2]] += 1
         by_country[left.country] += 1
         source_candidate_counts[counts[(entity_id, target_id[:2])]] += 1
+        if name_token_signature(ln) and name_token_signature(ln) == name_token_signature(rn):
+            name_key_overlap["signature_equal"] += 1
+        if len(compact_name(ln)) >= 8 and compact_name(ln) == compact_name(rn):
+            name_key_overlap["compact_equal"] += 1
         if len(examples) < 32:
             examples.append({"source1_id": entity_id, "target_id": target_id,
                              "source1_name": left.business_name, "target_name": right.business_name,
@@ -75,8 +80,10 @@ def main() -> None:
     report = {"sample_split": args.sample_split, "missed_links": len(misses),
               "categories": dict(sorted(categories.items())), "by_source": dict(sorted(by_source.items())),
               "by_country": dict(sorted(by_country.items())),
-              "misses_at_source_quota_64": source_candidate_counts[64],
-              "misses_below_source_quota_64": sum(value for count, value in source_candidate_counts.items() if count < 64),
+              "misses_at_final_source_quota_32": source_candidate_counts[32],
+              "misses_below_final_source_quota_32": sum(value for count, value in source_candidate_counts.items() if count < 32),
+              "misses_above_final_source_quota_32": sum(value for count, value in source_candidate_counts.items() if count > 32),
+              "name_key_overlap": dict(sorted(name_key_overlap.items())),
               "source_candidate_count_distribution_for_misses": dict(sorted(source_candidate_counts.items())),
               "examples": examples}
     args.out.parent.mkdir(parents=True, exist_ok=True)
